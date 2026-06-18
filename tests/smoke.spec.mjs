@@ -21,8 +21,10 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   await expect(page.locator('#mode-path')).toBeVisible();
   await expect(page.locator('#mode-coverage')).toBeHidden();
 
-  // Ignore third-party tile/data fetch errors; fail only on app/CSP errors.
+  // Ignore third-party tile/data fetch errors and benign meta-CSP notices;
+  // fail only on genuine app errors.
   const appErrors = errors.filter((e) =>
-    !/tile\.openstreetmap|services\.swpc|prop\.kc2g|favicon/i.test(e));
+    !/tile\.openstreetmap|services\.swpc|prop\.kc2g|favicon/i.test(e) &&
+    !/delivered via a <meta> element/i.test(e));
   expect(appErrors, appErrors.join('\n')).toHaveLength(0);
 });
