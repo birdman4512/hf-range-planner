@@ -168,7 +168,7 @@ export function bandStatus(analysis, freqMhz) {
  * appears naturally as an interval starting near 0.
  */
 export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar,
-                                    azStepDeg = 6, dStepKm = 150 }) {
+                                    azStepDeg = 4, dStepKm = 120 }) {
   const sectors = [];
   let maxReachKm = 0;
   let skipKm = null;

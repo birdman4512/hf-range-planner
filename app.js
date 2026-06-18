@@ -18,8 +18,16 @@ const state = {
   mode: 'coverage',
   tx: null, a: null, b: null,
   picking: null,
+  markers: { tx: null, a: null, b: null },
   layers: { terminator: null, kc2g: null, result: null },
 };
+
+const PIN_LABEL = { tx: 'TX', a: 'A', b: 'B' };
+const pinIcon = (which) => L.divIcon({
+  className: 'pin-wrap',
+  html: `<span class="pin pin-${which}">${PIN_LABEL[which]}</span>`,
+  iconSize: [28, 28], iconAnchor: [14, 14],
+});
 
 // --- Map -----------------------------------------------------------------
 
@@ -39,10 +47,20 @@ function initMap() {
 
 function setPoint(which, p) {
   state[which] = p;
-  const fmt = `${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}`;
-  if (which === 'tx') $('tx-coords').textContent = fmt;
-  if (which === 'a') $('a-coords').textContent = fmt;
-  if (which === 'b') $('b-coords').textContent = fmt;
+  $(`${which}-coords`).textContent = `${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}`;
+
+  if (state.markers[which]) {
+    state.markers[which].setLatLng([p.lat, p.lon]);
+  } else {
+    const m = L.marker([p.lat, p.lon], { draggable: true, icon: pinIcon(which) }).addTo(state.map);
+    m.on('dragend', () => {
+      const ll = m.getLatLng();
+      state[which] = { lat: +ll.lat.toFixed(3), lon: +ll.lng.toFixed(3) };
+      $(`${which}-coords`).textContent =
+        `${state[which].lat.toFixed(2)}, ${state[which].lon.toFixed(2)}`;
+    });
+    state.markers[which] = m;
+  }
 }
 
 // --- Conditions / time ---------------------------------------------------
@@ -264,12 +282,21 @@ function wire() {
   $('lyr-kc2g').addEventListener('change', toggleKc2g);
 }
 
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+  // SWs only run over https or localhost; silently skip otherwise.
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => { /* offline support is best-effort */ });
+  });
+}
+
 async function main() {
   initMap();
   initBands();
   setTimeInput(new Date());
   wire();
   redrawTerminator();
+  registerServiceWorker();
   await loadSolar();
 }
 

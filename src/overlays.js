@@ -6,21 +6,31 @@ import { terminatorPolyline, nightPolygon, destinationPoint } from './geo.js';
 const L = window.L;
 const KC2G_URL = 'https://prop.kc2g.com/renders/current/mufd-normal-now.svg';
 
+// The map repeats horizontally, so overlays are drawn on adjacent world copies.
+const WORLD_COPIES = [-360, 0, 360];
+const shiftLon = (pts, d) => pts.map(([lat, lon]) => [lat, lon + d]);
+
 /**
  * Day/night overlay: a dark shaded NIGHT hemisphere, the terminator boundary
- * line, and a subsolar "sun" marker. Returns a LayerGroup.
+ * line, and a subsolar "sun" marker — repeated across world copies so the
+ * shading continues as the user pans east/west. Returns a LayerGroup.
  */
 export function makeTerminator(subsolar) {
-  const night = L.polygon(nightPolygon(subsolar), {
-    stroke: false, fillColor: '#000018', fillOpacity: 0.42, interactive: false,
-  });
-  const line = L.polyline(terminatorPolyline(subsolar), {
-    color: '#f7a32f', weight: 1.5, dashArray: '4 4', opacity: 0.8, interactive: false,
-  });
-  const sun = L.circleMarker([subsolar.lat, subsolar.lon], {
-    radius: 6, color: '#ffd451', fillColor: '#ffd451', fillOpacity: 0.9, weight: 1,
-  }).bindTooltip('Subsolar point (local noon)');
-  return L.layerGroup([night, line, sun]);
+  const night = nightPolygon(subsolar);
+  const line = terminatorPolyline(subsolar);
+  const items = [];
+  for (const d of WORLD_COPIES) {
+    items.push(L.polygon(shiftLon(night, d), {
+      stroke: false, fillColor: '#000018', fillOpacity: 0.42, interactive: false,
+    }));
+    items.push(L.polyline(shiftLon(line, d), {
+      color: '#f7a32f', weight: 1.5, dashArray: '4 4', opacity: 0.8, interactive: false,
+    }));
+    items.push(L.circleMarker([subsolar.lat, subsolar.lon + d], {
+      radius: 6, color: '#ffd451', fillColor: '#ffd451', fillOpacity: 0.9, weight: 1,
+    }).bindTooltip('Subsolar point (local noon)'));
+  }
+  return L.layerGroup(items);
 }
 
 /**
@@ -36,36 +46,59 @@ export function makeKc2gOverlay(onError) {
   return layer;
 }
 
-// Colour by reliability proxy: closer to FOT and fewer hops ⇒ stronger.
-function sectorStyle(distKm) {
-  // Nearer = more saturated; far multi-hop = fainter.
-  const a = Math.max(0.12, 0.4 - distKm / 40000);
-  return { color: '#2f81f7', weight: 0, fillColor: '#2f81f7', fillOpacity: a };
+const FOOT_STYLE = { color: '#2f81f7', weight: 0, fillColor: '#2f81f7', fillOpacity: 0.33 };
+
+/**
+ * Render a coverage footprint (from propagation.coverageFootprint) as one
+ * smooth filled wedge per azimuth, spanning from the inner reach edge (the
+ * skip-zone boundary) out to the maximum reach in that direction. Closed
+ * directions produce no wedge, so the result reads as a filled coverage region
+ * with a central skip-zone hole and angular gaps — not radial streaks.
+ */
+// Circular 3-point median — kills isolated single-azimuth spikes/dropouts.
+function medianSmooth(arr) {
+  const n = arr.length;
+  return arr.map((_, i) => {
+    const t = [arr[(i - 1 + n) % n], arr[i], arr[(i + 1) % n]].sort((x, y) => x - y);
+    return t[1];
+  });
+}
+
+// Circular moving average over ±w samples — smooths the envelope so the
+// day/night terminator "comb" merges into a continuous coverage region.
+function circMean(arr, w) {
+  const n = arr.length;
+  return arr.map((_, i) => {
+    let sum = 0;
+    for (let k = -w; k <= w; k++) sum += arr[(i + k + n) % n];
+    return sum / (2 * w + 1);
+  });
 }
 
 /**
- * Render a coverage footprint (from propagation.coverageFootprint) as annular
- * sectors. Returns a LayerGroup.
+ * One smooth filled polygon: an outer reach envelope with a skip-zone hole.
+ * Directions that are closed collapse the envelope toward the TX, reading as
+ * gaps/notches rather than radial streaks.
  */
 export function makeFootprint(footprint) {
   const { txLat, txLon, azStepDeg, sectors } = footprint;
-  const group = [];
-  for (const sec of sectors) {
-    for (const [d0, d1] of sec.intervals) {
-      const ring = [];
-      const az0 = sec.azimuth;
-      const az1 = sec.azimuth + azStepDeg;
-      // Outer arc forward, inner arc back → closed polygon.
-      for (let az = az0; az <= az1; az += azStepDeg / 2) ring.push(destinationPoint(txLat, txLon, az, d1));
-      for (let az = az1; az >= az0; az -= azStepDeg / 2) ring.push(destinationPoint(txLat, txLon, az, Math.max(1, d0)));
-      group.push(L.polygon(ring, sectorStyle((d0 + d1) / 2)));
-    }
+  const n = sectors.length;
+  if (!n) return L.layerGroup([]);
+
+  const outer = circMean(medianSmooth(sectors.map((s) => (s.intervals.length ? s.intervals.at(-1)[1] : 0))), 2);
+  const inner = circMean(medianSmooth(sectors.map((s) => (s.intervals.length ? s.intervals[0][0] : 0))), 1);
+  if (outer.every((v) => v <= 1)) return L.layerGroup([]);
+
+  const mid = (i) => sectors[i].azimuth + azStepDeg / 2;
+  const outerRing = [];
+  const innerRing = [];
+  for (let i = 0; i < n; i++) {
+    outerRing.push(destinationPoint(txLat, txLon, mid(i), Math.max(1, outer[i])));
+    innerRing.push(destinationPoint(txLat, txLon, mid(i), Math.max(1, inner[i])));
   }
-  const tx = L.circleMarker([txLat, txLon], {
-    radius: 6, color: '#fff', fillColor: '#2f81f7', fillOpacity: 1, weight: 2,
-  }).bindTooltip('TX');
-  group.push(tx);
-  return L.layerGroup(group);
+  // Polygon with a hole: [outer ring, inner ring (reversed)].
+  const poly = L.polygon([outerRing, innerRing.reverse()], FOOT_STYLE);
+  return L.layerGroup([poly]);
 }
 
 /** Render a great-circle path with hop reflection points. Returns a LayerGroup. */

@@ -11,9 +11,19 @@
     img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com https://prop.kc2g.com;
     connect-src 'self' https://services.swpc.noaa.gov https://prop.kc2g.com;
     font-src 'self';
+    manifest-src 'self';
+    worker-src 'self';
     form-action 'none';
   " />
   <title>HF Range Planner</title>
+  <meta name="description" content="HF skywave propagation planner: coverage footprints and best-band picking, driven by live solar weather." />
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icon-180.png" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <meta name="theme-color" content="#0e1116" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="HF Planner" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
         integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
   <link rel="stylesheet" href="styles.css" />
@@ -29,7 +39,7 @@
       <!-- Solar weather -->
       <section class="panel" id="panel-solar">
         <h2>Solar &amp; ionospheric conditions</h2>
-        <div class="field-row">
+        <div class="grid3">
           <label>SFI (F10.7)
             <input type="number" id="in-sfi" min="60" max="320" step="1" />
           </label>
@@ -40,8 +50,8 @@
             <input type="number" id="in-kp" min="0" max="9" step="0.1" />
           </label>
         </div>
-        <div class="field-row">
-          <label class="grow">Time (UTC)
+        <div class="time-row">
+          <label>Time (UTC)
             <input type="datetime-local" id="in-time" />
           </label>
           <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
@@ -62,22 +72,21 @@
         <!-- Mode A: frequency -> footprint -->
         <div class="mode-body" id="mode-coverage">
           <p class="hint">Set a TX site, pick a frequency, see where the signal lands.</p>
-          <div class="field-row">
-            <button type="button" id="btn-pick-tx" class="ghost">Set TX on map</button>
-            <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 My location</button>
+          <div class="site">
+            <span class="site-tag pin pin-tx">TX</span>
+            <span id="tx-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-tx" class="ghost">On map</button>
+              <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
+            </div>
           </div>
-          <div class="field-row">
-            <span id="tx-coords" class="coords">— , —</span>
-          </div>
-          <div class="field-row">
-            <label class="grow">Band
+          <div class="grid2">
+            <label>Band
               <select id="in-band"></select>
             </label>
             <label>Freq (MHz)
               <input type="number" id="in-freq" min="1.8" max="30" step="0.1" />
             </label>
-          </div>
-          <div class="field-row">
             <label>TX power (W)
               <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
             </label>
@@ -92,14 +101,20 @@
         <!-- Mode B: two points -> band -->
         <div class="mode-body hidden" id="mode-path">
           <p class="hint">Drop two markers; get the best band for that path right now.</p>
-          <div class="field-row">
-            <button type="button" id="btn-pick-a" class="ghost">Set A</button>
-            <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
-            <span id="a-coords" class="coords">— , —</span>
+          <div class="site">
+            <span class="site-tag pin pin-a">A</span>
+            <span id="a-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-a" class="ghost">On map</button>
+              <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
+            </div>
           </div>
-          <div class="field-row">
-            <button type="button" id="btn-pick-b" class="ghost">Set B</button>
-            <span id="b-coords" class="coords">— , —</span>
+          <div class="site">
+            <span class="site-tag pin pin-b">B</span>
+            <span id="b-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-b" class="ghost">On map</button>
+            </div>
           </div>
           <button type="button" id="btn-run-path" class="primary">Recommend band</button>
           <div class="results" id="path-results"></div>

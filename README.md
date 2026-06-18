@@ -15,6 +15,10 @@ It folds in **live space weather** (NOAA SWPC, with manual override), a **day/ni
 overlay**, optional **KC2G MUF reference overlay**, and **ground-reflection clutter**
 (sea vs land) at each bounce.
 
+It's also an **installable PWA** (web app manifest + service worker): add it to your home
+screen / desktop and the app shell works offline (live data and map tiles still need a
+connection).
+
 > ⚠️ **Estimates only.** This is a self-contained analytic model calibrated to typical
 > ionospheric behaviour — *not* VOACAP or ITU-R P.533. Use it for planning intuition, not
 > guarantees.

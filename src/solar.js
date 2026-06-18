@@ -37,19 +37,20 @@ export async function fetchSpaceWeather() {
   try {
     const [flux, kpArr] = await Promise.all([getJson(EP_FLUX), getJson(EP_KP)]);
 
-    if (flux && flux.Flux != null) {
-      out.sfi = Math.round(Number(flux.Flux));
+    // Flux endpoint: array of objects [{ flux, time_tag }] (or a single object).
+    const fluxRec = Array.isArray(flux) ? flux[flux.length - 1] : flux;
+    const fluxVal = fluxRec && (fluxRec.flux ?? fluxRec.Flux);
+    if (fluxVal != null && Number.isFinite(Number(fluxVal))) {
+      out.sfi = Math.round(Number(fluxVal));
       out.ssn = ssnFromSfi(out.sfi);
-      out.timestamp = flux.TimeStamp || null;
+      out.timestamp = fluxRec.time_tag || fluxRec.TimeStamp || null;
     }
-    // EP_KP is an array of rows; row[0] is the header. Last row = latest.
-    if (Array.isArray(kpArr) && kpArr.length > 1) {
-      const header = kpArr[0];
-      const kpIdx = header.indexOf('Kp') >= 0 ? header.indexOf('Kp')
-                  : header.indexOf('kp_index') >= 0 ? header.indexOf('kp_index') : 1;
+
+    // Kp endpoint: array of objects [{ time_tag, Kp, a_running, ... }]; last = latest.
+    if (Array.isArray(kpArr) && kpArr.length) {
       const last = kpArr[kpArr.length - 1];
-      const kp = Number(last[kpIdx]);
-      if (Number.isFinite(kp)) out.kp = kp;
+      const kp = Number(last.Kp ?? last.kp_index ?? last.estimated_kp);
+      if (Number.isFinite(kp)) out.kp = Math.round(kp * 10) / 10;
     }
     out.source = 'NOAA SWPC';
     out.ok = true;

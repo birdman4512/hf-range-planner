@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="HF Range Planner">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#16314f"/>
+      <stop offset="1" stop-color="#0a0f17"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="96" fill="url(#bg)"/>
+  <!-- Ionosphere layer -->
+  <path d="M64 196 Q256 120 448 196" fill="none" stroke="#2f81f7" stroke-width="14"
+        stroke-linecap="round" opacity="0.55" stroke-dasharray="6 22"/>
+  <path d="M88 168 Q256 96 424 168" fill="none" stroke="#2f81f7" stroke-width="10"
+        stroke-linecap="round" opacity="0.3" stroke-dasharray="4 20"/>
+  <!-- Ground line -->
+  <line x1="64" y1="392" x2="448" y2="392" stroke="#3a4757" stroke-width="10" stroke-linecap="round"/>
+  <!-- Skip (skywave hop): up to the ionosphere and back down -->
+  <path d="M120 392 Q256 150 392 392" fill="none" stroke="#f7a32f" stroke-width="18" stroke-linecap="round"/>
+  <!-- TX tower: wide base, mast up to the beacon -->
+  <path d="M104 392 L120 320 M136 392 L120 320 M110 362 L130 362" stroke="#e6edf3" stroke-width="9"
+        stroke-linecap="round" fill="none"/>
+  <circle cx="120" cy="312" r="11" fill="#f7a32f"/>
+  <!-- Radiating waves from the beacon -->
+  <path d="M140 296 a40 40 0 0 1 0 32 M156 286 a60 60 0 0 1 0 52" fill="none"
+        stroke="#2f81f7" stroke-width="8" stroke-linecap="round" opacity="0.85"/>
+  <!-- Landing point -->
+  <circle cx="392" cy="392" r="13" fill="#3fb950"/>
+</svg>
