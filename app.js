@@ -19,7 +19,7 @@ const state = {
   tx: null, a: null, b: null,
   picking: null,
   markers: { tx: null, a: null, b: null },
-  layers: { terminator: null, kc2g: null, result: null },
+  layers: { terminator: null, kc2g: null, result: null, bandCoverage: null },
 };
 
 const PIN_LABEL = { tx: 'TX', a: 'A', b: 'B' };
@@ -115,6 +115,7 @@ async function loadSolar() {
 
 function clearResultLayer() {
   if (state.layers.result) { state.map.removeLayer(state.layers.result); state.layers.result = null; }
+  clearBandCoverage();
 }
 
 function runCoverage() {
@@ -132,6 +133,15 @@ function runCoverage() {
   const skip = fp.skipKm ? `${Math.round(fp.skipKm)} km` : 'none (local coverage)';
   const maxr = fp.maxReachKm ? `${Math.round(fp.maxReachKm)} km` : '—';
   const nvisOk = freq <= nvis;
+  const vhfNote = freq > 30
+    ? `<p class="hint">${freq.toFixed(0)} MHz is above the HF range — regular F2 skip is rare here.
+       Real openings on 6 m are usually <b>sporadic-E</b> or tropo, which this model does not predict,
+       so an empty footprint is expected most of the time.</p>`
+    : '';
+  const noReach = !fp.maxReachKm
+    ? `<p class="hint">No skywave coverage for this frequency, time and conditions
+       (likely above the MUF — try a lower band or daytime).</p>`
+    : '';
   $('coverage-results').innerHTML = `
     <table>
       <tr><td>Frequency</td><td><b>${freq.toFixed(2)} MHz</b> (${nearestBand(freq).label})</td></tr>
@@ -141,7 +151,8 @@ function runCoverage() {
         ? '<span class="pill open">local coverage</span>'
         : '<span class="pill closed">skips over</span>'}</td></tr>
     </table>
-    <p class="hint">Shaded rings = where this frequency lands. The gap nearest TX is the skip zone.</p>`;
+    ${noReach}${vhfNote}
+    <p class="hint">Shaded region = where this frequency lands. The gap nearest TX is the skip zone.</p>`;
 }
 
 // --- Mode B: point-to-point best band ------------------------------------
@@ -185,7 +196,8 @@ function runPath() {
     const st = bandStatus(analysis, b.mhz);
     const rel = st === 'open' ? `${reliabilityPct(analysis, b.mhz, ground.totalDb)}%` : '—';
     const cls = best && b.name === best.name ? 'row-best' : '';
-    return `<tr class="${cls}"><td>${b.label}</td><td><span class="pill ${st}">${st}</span></td><td>${rel}</td></tr>`;
+    return `<tr class="band-row ${cls}" data-freq="${b.mhz}"><td>${b.label}</td>` +
+           `<td><span class="pill ${st}">${st}</span></td><td>${rel}</td></tr>`;
   }).join('');
 
   const surfaces = ground.detail.length
@@ -204,7 +216,37 @@ function runPath() {
       <tr><th>Band</th><th>Status</th><th>Rel.</th></tr>
       ${rows}
     </table>
-    <p class="hint">FOT (≈0.85×MUF) is the day-to-day reliable working frequency.</p>`;
+    <p class="hint">Click a band to map its coverage from both ends
+      (<span class="dot dot-a"></span>A, <span class="dot dot-b"></span>B).
+      FOT (≈0.85×MUF) is the day-to-day reliable working frequency.</p>`;
+
+  // Clicking a band row overlays the coverage footprint from A and from B.
+  for (const tr of $('path-results').querySelectorAll('.band-row')) {
+    tr.addEventListener('click', () => {
+      for (const r of $('path-results').querySelectorAll('.band-row')) r.classList.remove('selected');
+      tr.classList.add('selected');
+      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar });
+    });
+  }
+}
+
+function clearBandCoverage() {
+  if (state.layers.bandCoverage) {
+    state.map.removeLayer(state.layers.bandCoverage);
+    state.layers.bandCoverage = null;
+  }
+}
+
+function showBandCoverage(freqMhz, { ssn, kp, subsolar }) {
+  clearBandCoverage();
+  const grp = L.layerGroup();
+  for (const [pt, color] of [[state.a, '#3fb950'], [state.b, '#f7a32f']]) {
+    if (!pt) continue;
+    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar });
+    makeFootprint(fp, { color, opacity: 0.26 }).addTo(grp);
+  }
+  grp.addTo(state.map);
+  state.layers.bandCoverage = grp;
 }
 
 // --- Geolocation ---------------------------------------------------------
@@ -280,6 +322,16 @@ function wire() {
 
   $('lyr-terminator').addEventListener('change', redrawTerminator);
   $('lyr-kc2g').addEventListener('change', toggleKc2g);
+
+  $('btn-collapse').addEventListener('click', () => setCollapsed(true));
+  $('btn-expand').addEventListener('click', () => setCollapsed(false));
+}
+
+function setCollapsed(collapsed) {
+  document.getElementById('app').classList.toggle('collapsed', collapsed);
+  $('btn-expand').hidden = !collapsed;
+  // Leaflet needs to recompute size after the container width changes.
+  setTimeout(() => state.map.invalidateSize(), 220);
 }
 
 function registerServiceWorker() {

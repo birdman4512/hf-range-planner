@@ -11,7 +11,7 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   // Title + sidebar present.
   await expect(page.locator('#brand h1')).toHaveText('HF Range Planner');
   // Band selector populated from bands.js.
-  await expect(page.locator('#in-band option')).toHaveCount(10);
+  await expect(page.locator('#in-band option')).toHaveCount(11);
   // Leaflet map initialised (the leaflet-container class lands on #map itself).
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
   await expect(page.locator('#map .leaflet-tile-pane')).toHaveCount(1);

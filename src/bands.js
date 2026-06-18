@@ -14,6 +14,7 @@ export const BANDS = [
   { name: '15m', label: '15 m', mhz: 21.2, lowMhz: 21.0, highMhz: 21.45 },
   { name: '12m', label: '12 m', mhz: 24.93, lowMhz: 24.89, highMhz: 24.99 },
   { name: '10m', label: '10 m', mhz: 28.3, lowMhz: 28.0, highMhz: 29.7 },
+  { name: '6m', label: '6 m', mhz: 50.15, lowMhz: 50.0, highMhz: 54.0 },
 ];
 
 export function bandByName(name) {

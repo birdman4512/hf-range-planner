@@ -32,8 +32,11 @@
   <div id="app">
     <aside id="sidebar">
       <header id="brand">
-        <h1>HF Range Planner</h1>
-        <p class="tagline">Skywave coverage &amp; band picker for the HF bands</p>
+        <div class="brand-text">
+          <h1>HF Range Planner</h1>
+          <p class="tagline">Skywave coverage &amp; band picker for the HF bands</p>
+        </div>
+        <button type="button" id="btn-collapse" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">‹</button>
       </header>
 
       <!-- Solar weather -->
@@ -124,9 +127,18 @@
       <!-- Layers -->
       <section class="panel" id="panel-layers">
         <h2>Layers</h2>
-        <label class="check"><input type="checkbox" id="lyr-terminator" checked /> Day/night terminator</label>
-        <label class="check"><input type="checkbox" id="lyr-kc2g" /> KC2G MUF reference overlay</label>
-        <label class="check"><input type="checkbox" id="lyr-clutter" checked /> Ground-reflection clutter</label>
+        <label class="toggle">
+          <span class="toggle-label">Day/night terminator</span>
+          <input type="checkbox" id="lyr-terminator" checked /><span class="switch"></span>
+        </label>
+        <label class="toggle">
+          <span class="toggle-label">KC2G MUF reference overlay</span>
+          <input type="checkbox" id="lyr-kc2g" /><span class="switch"></span>
+        </label>
+        <label class="toggle">
+          <span class="toggle-label">Ground-reflection clutter</span>
+          <input type="checkbox" id="lyr-clutter" checked /><span class="switch"></span>
+        </label>
       </section>
 
       <footer id="caveat">
@@ -136,6 +148,7 @@
     </aside>
 
     <main id="map" aria-label="Propagation map"></main>
+    <button type="button" id="btn-expand" class="icon-btn" title="Show panel" aria-label="Show panel" hidden>☰</button>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
