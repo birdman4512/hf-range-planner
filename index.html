@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'none';
+    base-uri 'self';
+    script-src 'self' https://unpkg.com;
+    style-src 'self' https://unpkg.com;
+    img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com https://prop.kc2g.com;
+    connect-src 'self' https://services.swpc.noaa.gov https://prop.kc2g.com;
+    font-src 'self';
+    form-action 'none';
+    frame-ancestors 'none';
+  " />
+  <title>HF Range Planner</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header id="brand">
+        <h1>HF Range Planner</h1>
+        <p class="tagline">Skywave coverage &amp; band picker for the HF bands</p>
+      </header>
+
+      <!-- Solar weather -->
+      <section class="panel" id="panel-solar">
+        <h2>Solar &amp; ionospheric conditions</h2>
+        <div class="field-row">
+          <label>SFI (F10.7)
+            <input type="number" id="in-sfi" min="60" max="320" step="1" />
+          </label>
+          <label>SSN
+            <input type="number" id="in-ssn" min="0" max="350" step="1" />
+          </label>
+          <label>Kp
+            <input type="number" id="in-kp" min="0" max="9" step="0.1" />
+          </label>
+        </div>
+        <div class="field-row">
+          <label class="grow">Time (UTC)
+            <input type="datetime-local" id="in-time" />
+          </label>
+          <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
+        </div>
+        <div class="status-line">
+          <span id="solar-status">Loading live data…</span>
+          <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>
+        </div>
+      </section>
+
+      <!-- Mode switch -->
+      <section class="panel" id="panel-mode">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" id="tab-coverage" role="tab">Coverage</button>
+          <button type="button" class="tab" id="tab-path" role="tab">Path / Band</button>
+        </div>
+
+        <!-- Mode A: frequency -> footprint -->
+        <div class="mode-body" id="mode-coverage">
+          <p class="hint">Set a TX site, pick a frequency, see where the signal lands.</p>
+          <div class="field-row">
+            <button type="button" id="btn-pick-tx" class="ghost">Set TX on map</button>
+            <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 My location</button>
+          </div>
+          <div class="field-row">
+            <span id="tx-coords" class="coords">— , —</span>
+          </div>
+          <div class="field-row">
+            <label class="grow">Band
+              <select id="in-band"></select>
+            </label>
+            <label>Freq (MHz)
+              <input type="number" id="in-freq" min="1.8" max="30" step="0.1" />
+            </label>
+          </div>
+          <div class="field-row">
+            <label>TX power (W)
+              <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
+            </label>
+            <label>Takeoff (°)
+              <input type="number" id="in-takeoff" min="1" max="45" step="1" value="15" />
+            </label>
+          </div>
+          <button type="button" id="btn-run-coverage" class="primary">Compute coverage</button>
+          <div class="results" id="coverage-results"></div>
+        </div>
+
+        <!-- Mode B: two points -> band -->
+        <div class="mode-body hidden" id="mode-path">
+          <p class="hint">Drop two markers; get the best band for that path right now.</p>
+          <div class="field-row">
+            <button type="button" id="btn-pick-a" class="ghost">Set A</button>
+            <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
+            <span id="a-coords" class="coords">— , —</span>
+          </div>
+          <div class="field-row">
+            <button type="button" id="btn-pick-b" class="ghost">Set B</button>
+            <span id="b-coords" class="coords">— , —</span>
+          </div>
+          <button type="button" id="btn-run-path" class="primary">Recommend band</button>
+          <div class="results" id="path-results"></div>
+        </div>
+      </section>
+
+      <!-- Layers -->
+      <section class="panel" id="panel-layers">
+        <h2>Layers</h2>
+        <label class="check"><input type="checkbox" id="lyr-terminator" checked /> Day/night terminator</label>
+        <label class="check"><input type="checkbox" id="lyr-kc2g" /> KC2G MUF reference overlay</label>
+        <label class="check"><input type="checkbox" id="lyr-clutter" checked /> Ground-reflection clutter</label>
+      </section>
+
+      <footer id="caveat">
+        <p>Estimates only — a statistical analytic model, not VOACAP/ITU-R P.533.
+           KC2G overlay is third-party (IRI-2020 + GIRO).</p>
+      </footer>
+    </aside>
+
+    <main id="map" aria-label="Propagation map"></main>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

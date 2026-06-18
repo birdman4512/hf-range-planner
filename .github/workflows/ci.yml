@@ -1,0 +1,51 @@
+name: CI & Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install
+      - name: Lint + unit tests
+        run: npm run verify
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Smoke test
+        run: npm run test:smoke
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble _site (whitelist static assets only)
+        run: |
+          mkdir -p _site
+          cp index.html styles.css app.js _site/
+          cp -r src _site/src
+          if [ -d data ]; then cp -r data _site/data; fi
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
