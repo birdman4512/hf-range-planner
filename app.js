@@ -1,7 +1,7 @@
 // app.js — UI bootstrap and orchestration. Imports the pure engine modules and
 // wires them to the Leaflet map and the sidebar controls.
 
-import { subsolarPoint, destinationPoint } from './src/geo.js';
+import { subsolarPoint, destinationPoint, cosZenith } from './src/geo.js';
 import { fetchSpaceWeather, ssnFromSfi } from './src/solar.js';
 import { BANDS } from './src/bands.js';
 import { analyzePath, coverageFootprint, bandStatus } from './src/propagation.js';
@@ -16,6 +16,7 @@ const state = {
   mode: 'coverage',
   tx: null, a: null, b: null,
   picking: null,
+  timeUTC: new Date(),
   activeBands: new Set(),
   bandLayers: {},
   markers: { tx: null, a: null, b: null },
@@ -77,12 +78,14 @@ function setPoint(which, p) {
       state[which] = { lat: +ll.lat.toFixed(3), lon: +ll.lng.toFixed(3) };
       $(`${which}-coords`).textContent =
         `${state[which].lat.toFixed(2)}, ${state[which].lon.toFixed(2)}`;
+      renderTimeInput();
       if (which === 'tx') renderActiveBands();
     });
     const ghosts = GHOST_OFFSETS.map((d) =>
       L.marker([p.lat, p.lon + d], { icon: pinIcon(which), interactive: false, keyboard: false }).addTo(state.map));
     state.markers[which] = { main, ghosts };
   }
+  renderTimeInput(); // re-show the time in the (possibly new) site's local zone
   if (which === 'tx') renderActiveBands();
 }
 
@@ -94,22 +97,46 @@ function getConditions() {
   return { ssn, kp };
 }
 
-function getTimeUTC() {
-  const v = $('in-time').value;
-  // datetime-local has no zone; we treat the entered value as UTC for HF work.
-  return v ? new Date(v + ':00Z') : new Date();
+// The time field shows LOCAL (solar) time at the active site, derived from its
+// longitude (≈ lon/15 hours), while the model works in UTC. This makes the
+// day/night state obvious — drop a TX and the clock reads its local time.
+function siteForTime() {
+  return state.mode === 'coverage' ? state.tx : state.a;
+}
+function tzOffsetMs() {
+  const s = siteForTime();
+  return (s ? s.lon / 15 : 0) * 3600000;
 }
 
 function getSubsolar() {
-  return subsolarPoint(getTimeUTC());
+  return subsolarPoint(state.timeUTC);
 }
 
-function setTimeInput(date) {
-  // Render a Date as a UTC datetime-local string (yyyy-MM-ddThh:mm).
+function renderTimeInput() {
+  const local = new Date(state.timeUTC.getTime() + tzOffsetMs());
   const p = (n) => String(n).padStart(2, '0');
   $('in-time').value =
-    `${date.getUTCFullYear()}-${p(date.getUTCMonth() + 1)}-${p(date.getUTCDate())}` +
-    `T${p(date.getUTCHours())}:${p(date.getUTCMinutes())}`;
+    `${local.getUTCFullYear()}-${p(local.getUTCMonth() + 1)}-${p(local.getUTCDate())}` +
+    `T${p(local.getUTCHours())}:${p(local.getUTCMinutes())}`;
+}
+
+function readTimeInput() {
+  const v = $('in-time').value;
+  if (!v) return;
+  const localWall = new Date(v + ':00Z').getTime(); // wall-clock value as ms
+  state.timeUTC = new Date(localWall - tzOffsetMs());
+}
+
+// Snap to local solar noon at the active site, so high-band daytime coverage is
+// one click away instead of guessing the hour.
+function setNoonAtSite() {
+  if (!siteForTime()) { alert('Set a TX/A site first.'); return; }
+  const local = new Date(state.timeUTC.getTime() + tzOffsetMs());
+  const noonWall = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate(), 12, 0, 0);
+  state.timeUTC = new Date(noonWall - tzOffsetMs());
+  renderTimeInput();
+  redrawTerminator();
+  renderActiveBands();
 }
 
 function redrawTerminator() {
@@ -159,12 +186,14 @@ function clearBandLayers() {
   }
 }
 
-// Why is a band giving no coverage right now? Sample a representative 2500 km
-// path due east of the TX to see whether it's above the MUF or D-layer absorbed.
+// Why is a band giving no coverage right now? First check whether the TX is in
+// darkness (the usual cause for a high band), then sample a 2500 km path east.
 function bandDiagnosis(band, env) {
+  const cz = cosZenith(state.tx.lat, state.tx.lon, env.subsolar);
+  if (cz < 0.02 && band.mhz > 10) return 'your TX is in darkness — high bands need daylight (try ☼ Noon, or a lower band)';
   const [rxLat, rxLon] = destinationPoint(state.tx.lat, state.tx.lon, 90, 2500);
   const a = analyzePath({ lat1: state.tx.lat, lon1: state.tx.lon, lat2: rxLat, lon2: rxLon, ...env });
-  if (band.mhz > a.mufMhz) return 'above MUF — try in daylight or a lower band';
+  if (band.mhz > a.mufMhz) return 'above MUF — sun is low; try ☼ Noon or a lower band';
   if (band.mhz < a.lufMhz) return 'D-layer absorbed — try after dark';
   return 'closed here, open on other paths';
 }
@@ -344,6 +373,7 @@ function setMode(mode) {
   $('tab-path').classList.toggle('active', mode === 'path');
   $('mode-coverage').classList.toggle('hidden', mode !== 'coverage');
   $('mode-path').classList.toggle('hidden', mode !== 'path');
+  renderTimeInput(); // the active site (and thus local-time zone) may have changed
   if (mode === 'path') {
     clearBandLayers();
   } else {
@@ -406,8 +436,9 @@ function wire() {
   $('in-kp').addEventListener('change', refresh);
 
   $('btn-refresh-solar').addEventListener('click', loadSolar);
-  $('btn-now').addEventListener('click', () => { setTimeInput(new Date()); redrawTerminator(); refresh(); });
-  $('in-time').addEventListener('change', () => { redrawTerminator(); refresh(); });
+  $('btn-now').addEventListener('click', () => { state.timeUTC = new Date(); renderTimeInput(); redrawTerminator(); refresh(); });
+  $('btn-noon').addEventListener('click', setNoonAtSite);
+  $('in-time').addEventListener('change', () => { readTimeInput(); redrawTerminator(); refresh(); });
   $('in-sfi').addEventListener('change', () => {
     $('in-ssn').value = ssnFromSfi(Number($('in-sfi').value) || 0);
     refresh();
@@ -438,7 +469,8 @@ function registerServiceWorker() {
 async function main() {
   initMap();
   initBandToggles();
-  setTimeInput(new Date());
+  state.timeUTC = new Date();
+  renderTimeInput();
   wire();
   redrawTerminator();
   registerServiceWorker();

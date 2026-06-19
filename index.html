@@ -54,10 +54,11 @@
           </label>
         </div>
         <div class="time-row">
-          <label>Time (UTC)
+          <label title="Local solar time at your TX/A site (derived from longitude)">Local time @ site
             <input type="datetime-local" id="in-time" />
           </label>
           <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
+          <button type="button" id="btn-noon" class="ghost" title="Set time to solar noon at your TX/A site">☼ Noon</button>
         </div>
         <div class="status-line">
           <span id="solar-status">Loading live data…</span>

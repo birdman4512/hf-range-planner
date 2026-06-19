@@ -182,7 +182,7 @@ button.primary:hover { filter: brightness(1.08); }
 button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
 /* Time row: input grows, Now button aligns to its bottom. */
-.time-row { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: end; margin-top: 10px; }
+.time-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; margin-top: 10px; }
 
 .status-line {
   display: flex;
