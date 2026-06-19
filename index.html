@@ -60,6 +60,11 @@
           <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
           <button type="button" id="btn-noon" class="ghost" title="Set time to solar noon at your TX/A site">☼ Noon</button>
         </div>
+        <div class="slider-row" title="Scrub forward in time to forecast how the bands open and close">
+          <input type="range" id="time-slider" min="0" max="72" step="1" value="0" />
+          <span id="slider-label" class="slider-label">now</span>
+        </div>
+        <p id="forecast-note" class="forecast-note"></p>
         <div class="status-line">
           <span id="solar-status">Loading live data…</span>
           <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>

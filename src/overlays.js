@@ -33,17 +33,47 @@ export function makeTerminator(subsolar) {
   return L.layerGroup(items);
 }
 
+// KC2G renders an equirectangular SVG with axes/labels around a plot area. These
+// are the plot-area bounds in viewBox units (lon −180..180, lat 90..−90).
+const KC2G_VB_W = 1144.848;
+const KC2G_MAP = { x: 35.305, y: 24.142, w: 1092.8, h: 546.4 };
+const MERC_MAX = 85.0511287798;
+
 /**
- * KC2G MUF reference overlay (equirectangular SVG). Alignment is approximate —
- * it is a third-party visual reference, not part of the model. Returns the
- * layer; caller toggles it. `onError` fires if the image fails to load.
+ * KC2G MUF reference overlay. The source is equirectangular but our map is Web
+ * Mercator, so we crop to the plot area and reproject (row-by-row) onto a canvas
+ * before overlaying — that makes it actually line up. Returns a LayerGroup that
+ * fills in once the image loads; `onError` fires if it can't (CORS/network).
  */
 export function makeKc2gOverlay(onError) {
-  const layer = L.imageOverlay(KC2G_URL, [[-90, -180], [90, 180]], {
-    opacity: 0.55, interactive: false,
-  });
-  layer.on('error', () => onError && onError());
-  return layer;
+  const group = L.layerGroup();
+  const img = new Image();
+  img.crossOrigin = 'anonymous';
+  img.onload = () => {
+    try {
+      const s = img.naturalWidth / KC2G_VB_W;
+      const sx = KC2G_MAP.x * s, sy = KC2G_MAP.y * s, sw = KC2G_MAP.w * s, sh = KC2G_MAP.h * s;
+      const W = 1024, H = 1024;
+      const cv = document.createElement('canvas');
+      cv.width = W; cv.height = H;
+      const ctx = cv.getContext('2d');
+      const yTop = Math.log(Math.tan(Math.PI / 4 + (MERC_MAX * Math.PI / 180) / 2));
+      for (let j = 0; j < H; j++) {
+        const my = yTop - (2 * yTop) * (j / (H - 1));            // Mercator y for this row
+        const lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
+        const srcRow = sy + ((90 - lat) / 180) * sh;            // equirectangular source row
+        ctx.drawImage(img, sx, srcRow, sw, 1, 0, j, W, 1);
+      }
+      L.imageOverlay(cv.toDataURL('image/png'), [[-MERC_MAX, -180], [MERC_MAX, 180]], {
+        opacity: 0.5, interactive: false,
+      }).addTo(group);
+    } catch (e) {
+      onError && onError();
+    }
+  };
+  img.onerror = () => onError && onError();
+  img.src = KC2G_URL;
+  return group;
 }
 
 // Circular 3-point median — kills isolated single-azimuth spikes/dropouts.

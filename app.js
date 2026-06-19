@@ -2,7 +2,7 @@
 // wires them to the Leaflet map and the sidebar controls.
 
 import { subsolarPoint, destinationPoint, cosZenith } from './src/geo.js';
-import { fetchSpaceWeather, ssnFromSfi } from './src/solar.js';
+import { fetchSpaceWeather, fetchForecast, ssnFromSfi } from './src/solar.js';
 import { BANDS } from './src/bands.js';
 import { analyzePath, coverageFootprint, bandStatus } from './src/propagation.js';
 import { groundReflectionLossDb } from './src/clutter.js';
@@ -17,6 +17,9 @@ const state = {
   tx: null, a: null, b: null,
   picking: null,
   timeUTC: new Date(),
+  anchorTime: Date.now(),
+  forecast: [],
+  liveSolar: null,
   activeBands: new Set(),
   bandLayers: {},
   markers: { tx: null, a: null, b: null },
@@ -118,6 +121,7 @@ function renderTimeInput() {
   $('in-time').value =
     `${local.getUTCFullYear()}-${p(local.getUTCMonth() + 1)}-${p(local.getUTCDate())}` +
     `T${p(local.getUTCHours())}:${p(local.getUTCMinutes())}`;
+  syncSlider();
 }
 
 function readTimeInput() {
@@ -125,6 +129,57 @@ function readTimeInput() {
   if (!v) return;
   const localWall = new Date(v + ':00Z').getTime(); // wall-clock value as ms
   state.timeUTC = new Date(localWall - tzOffsetMs());
+}
+
+// Re-run whichever mode is active (Path without re-framing; Coverage re-renders).
+function refreshActive() {
+  if (state.mode === 'path') { if (state.a && state.b) runPath(false); }
+  else renderActiveBands();
+}
+
+function syncSlider() {
+  const slider = $('time-slider');
+  const h = Math.round((state.timeUTC.getTime() - state.anchorTime) / 3600000);
+  if (h >= 0 && h <= Number(slider.max)) {
+    slider.value = h;
+    $('slider-label').textContent = h === 0 ? 'now' : `+${h} h`;
+  }
+}
+
+function setIndices(sfi, kp) {
+  $('in-sfi').value = sfi;
+  $('in-ssn').value = ssnFromSfi(sfi);
+  $('in-kp').value = kp;
+}
+
+// On a future day, apply that day's NOAA 27-day forecast SFI/Kp; on today/past,
+// restore the live values.
+function applyIndicesForTime() {
+  const now = new Date();
+  const dayStart = Date.UTC(state.timeUTC.getUTCFullYear(), state.timeUTC.getUTCMonth(), state.timeUTC.getUTCDate());
+  const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  if (dayStart <= todayStart || !state.forecast.length) {
+    if (state.liveSolar) setIndices(state.liveSolar.sfi, state.liveSolar.kp);
+    $('forecast-note').textContent = '';
+    return;
+  }
+  let row = state.forecast.find((r) => r.date === dayStart);
+  if (!row) row = state.forecast.reduce((b, r) => (Math.abs(r.date - dayStart) < Math.abs(b.date - dayStart) ? r : b));
+  if (row) {
+    setIndices(row.sfi, row.kp);
+    $('forecast-note').textContent =
+      `NOAA forecast for ${new Date(row.date).toUTCString().slice(5, 11)}: SFI ${row.sfi}, Kp ${row.kp}`;
+  }
+}
+
+function onSlider() {
+  const h = Number($('time-slider').value);
+  state.timeUTC = new Date(state.anchorTime + h * 3600000);
+  $('slider-label').textContent = h === 0 ? 'now' : `+${h} h`;
+  applyIndicesForTime();
+  renderTimeInput();
+  redrawTerminator();
+  refreshActive();
 }
 
 // Snap to local solar noon at the active site, so high-band daytime coverage is
@@ -150,6 +205,7 @@ function redrawTerminator() {
 async function loadSolar() {
   $('solar-status').textContent = 'Loading live data…';
   const sw = await fetchSpaceWeather();
+  state.liveSolar = { sfi: sw.sfi, ssn: sw.ssn, kp: sw.kp };
   $('in-sfi').value = sw.sfi;
   $('in-ssn').value = sw.ssn;
   $('in-kp').value = sw.kp;
@@ -316,6 +372,42 @@ function runPath(fit = true) {
       showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW, minTakeoffDeg });
     });
   }
+
+  $('path-results').insertAdjacentHTML('beforeend', renderBandChart(state.a, state.b, { ssn, kp, powerW, minTakeoffDeg }));
+}
+
+// A 24-hour open/marginal/closed timeline for every band on the A–B path, so you
+// can see the best time to call. Diurnal change dominates; indices held constant.
+function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg }) {
+  const HOURS = 24;
+  const analyses = [];
+  for (let h = 0; h < HOURS; h++) {
+    const subsolar = subsolarPoint(new Date(state.anchorTime + h * 3600000));
+    analyses.push(analyzePath({ lat1: a.lat, lon1: a.lon, lat2: b.lat, lon2: b.lon, ssn, kp, subsolar, powerW, minTakeoffDeg }));
+  }
+  const nowH = Math.round((state.timeUTC.getTime() - state.anchorTime) / 3600000);
+  const anchorH = state.anchorTime / 3600000 + a.lon / 15; // local-at-A hour of column 0
+
+  let head = '<tr><th class="blabel"></th>';
+  for (let h = 0; h < HOURS; h++) {
+    const lh = ((Math.floor(anchorH + h) % 24) + 24) % 24;
+    head += `<th class="hr">${h % 6 === 0 ? String(lh).padStart(2, '0') : ''}</th>`;
+  }
+  head += '</tr>';
+
+  let body = '';
+  for (const band of [...BANDS].reverse()) { // highest band on top
+    body += `<tr><td class="blabel">${band.label}</td>`;
+    for (let h = 0; h < HOURS; h++) {
+      const st = bandStatus(analyses[h], band.mhz);
+      body += `<td class="cell ${st}${h === nowH ? ' now' : ''}"></td>`;
+    }
+    body += '</tr>';
+  }
+  return `<div class="bandchart">
+    <div class="hint" style="margin:8px 0 4px">Next 24 h on this path — <span style="color:var(--good)">open</span> /
+      <span style="color:var(--warn)">marginal</span> / closed. Hours = local time at A.</div>
+    <table>${head}${body}</table></div>`;
 }
 
 function clearBandCoverage() {
@@ -428,20 +520,24 @@ function wire() {
 
   $('btn-run-path').addEventListener('click', () => runPath(true));
 
-  // Inputs that change conditions update whichever mode is active (Path re-runs
-  // without re-framing; Coverage re-renders its active bands).
-  const refresh = () => {
-    if (state.mode === 'path') { if (state.a && state.b) runPath(false); }
-    else renderActiveBands();
-  };
+  // Inputs that change conditions update whichever mode is active.
+  const refresh = refreshActive;
   $('btn-recompute').addEventListener('click', refresh);
   $('in-power').addEventListener('change', refresh);
   $('in-takeoff').addEventListener('change', refresh);
   $('in-ssn').addEventListener('change', refresh);
   $('in-kp').addEventListener('change', refresh);
 
+  $('time-slider').addEventListener('input', onSlider);
   $('btn-refresh-solar').addEventListener('click', loadSolar);
-  $('btn-now').addEventListener('click', () => { state.timeUTC = new Date(); renderTimeInput(); redrawTerminator(); refresh(); });
+  $('btn-now').addEventListener('click', () => {
+    state.anchorTime = Date.now();
+    state.timeUTC = new Date();
+    applyIndicesForTime();
+    renderTimeInput();
+    redrawTerminator();
+    refresh();
+  });
   $('btn-noon').addEventListener('click', setNoonAtSite);
   $('in-time').addEventListener('change', () => { readTimeInput(); redrawTerminator(); refresh(); });
   $('in-sfi').addEventListener('change', () => {
@@ -474,12 +570,14 @@ function registerServiceWorker() {
 async function main() {
   initMap();
   initBandToggles();
+  state.anchorTime = Date.now();
   state.timeUTC = new Date();
   renderTimeInput();
   wire();
   redrawTerminator();
   registerServiceWorker();
   await loadSolar();
+  state.forecast = await fetchForecast(); // for the time-slider forecast indices
 }
 
 main();

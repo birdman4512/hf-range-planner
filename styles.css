@@ -184,6 +184,23 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 /* Time row: input grows, Now button aligns to its bottom. */
 .time-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; margin-top: 10px; }
 
+.slider-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+#time-slider { flex: 1; accent-color: var(--accent); }
+.slider-label { font-size: 11px; color: var(--muted); min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
+.forecast-note { margin: 6px 0 0; font-size: 11px; color: var(--accent-2); min-height: 0; }
+
+/* Path 24-hour band-opening chart */
+.bandchart { margin-top: 10px; font-size: 10px; }
+.bandchart table { border-collapse: collapse; width: 100%; }
+.bandchart td, .bandchart th { padding: 0; }
+.bandchart .blabel { font-size: 10px; color: var(--muted); padding-right: 6px; white-space: nowrap; text-align: right; width: 1%; }
+.bandchart .cell { width: 4.1%; height: 11px; border: 0.5px solid var(--bg); }
+.bandchart .cell.open { background: var(--good); }
+.bandchart .cell.marginal { background: var(--warn); }
+.bandchart .cell.closed { background: var(--panel-2); }
+.bandchart .hr { color: var(--muted); font-size: 9px; text-align: left; }
+.bandchart .now { outline: 1px solid #fff; outline-offset: -1px; }
+
 .status-line {
   display: flex;
   justify-content: space-between;

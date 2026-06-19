@@ -4,6 +4,31 @@
 const SWPC = 'https://services.swpc.noaa.gov';
 const EP_FLUX = `${SWPC}/products/summary/10cm-flux.json`;
 const EP_KP = `${SWPC}/products/noaa-planetary-k-index.json`;
+const EP_OUTLOOK = `${SWPC}/text/27-day-outlook.txt`;
+
+const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+/**
+ * NOAA 27-day outlook: daily forecast of 10.7 cm flux (SFI), Ap and largest Kp.
+ * Returns [{ date(ms UTC, day start), sfi, ap, kp }]. Empty array on failure.
+ */
+export async function fetchForecast() {
+  try {
+    const r = await fetch(EP_OUTLOOK, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const text = await r.text();
+    const rows = [];
+    for (const line of text.split('\n')) {
+      const m = line.match(/^(\d{4})\s+([A-Z][a-z]{2})\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+      if (m && MONTHS[m[2]] != null) {
+        rows.push({ date: Date.UTC(+m[1], MONTHS[m[2]], +m[3]), sfi: +m[4], ap: +m[5], kp: +m[6] });
+      }
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Standard Covington relation SFI = 63.75 + 0.728·SSN + 0.00089·SSN².
