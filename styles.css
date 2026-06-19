@@ -184,8 +184,10 @@ button.active { background: var(--accent); border-color: var(--accent); color: #
 /* Time row: input grows, Now button aligns to its bottom. */
 .time-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; margin-top: 10px; }
 
-.slider-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
-#time-slider { flex: 1; accent-color: var(--accent); }
+.slider-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.slider-row .step { width: 26px; height: 26px; flex: none; padding: 0; font-size: 10px; color: var(--muted); }
+.slider-row .step:hover { border-color: var(--accent); color: #fff; }
+#time-slider { flex: 1; accent-color: var(--accent); min-width: 0; }
 .slider-label { font-size: 11px; color: var(--muted); min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
 .forecast-note { margin: 6px 0 0; font-size: 11px; color: var(--accent-2); min-height: 0; }
 

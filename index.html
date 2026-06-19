@@ -61,7 +61,9 @@
           <button type="button" id="btn-noon" class="ghost" title="Set time to solar noon at your TX/A site">☼ Noon</button>
         </div>
         <div class="slider-row" title="Scrub forward in time to forecast how the bands open and close">
+          <button type="button" id="btn-step-back" class="step" title="−1 hour" aria-label="Back one hour">◀</button>
           <input type="range" id="time-slider" min="0" max="72" step="1" value="0" />
+          <button type="button" id="btn-step-fwd" class="step" title="+1 hour" aria-label="Forward one hour">▶</button>
           <span id="slider-label" class="slider-label">now</span>
         </div>
         <p id="forecast-note" class="forecast-note"></p>

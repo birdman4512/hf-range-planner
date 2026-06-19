@@ -531,6 +531,13 @@ function wire() {
   $('in-kp').addEventListener('change', refresh);
 
   $('time-slider').addEventListener('input', onSlider);
+  const stepSlider = (delta) => {
+    const s = $('time-slider');
+    s.value = Math.min(Number(s.max), Math.max(Number(s.min), Number(s.value) + delta));
+    onSlider();
+  };
+  $('btn-step-back').addEventListener('click', () => stepSlider(-1));
+  $('btn-step-fwd').addEventListener('click', () => stepSlider(1));
   $('btn-refresh-solar').addEventListener('click', loadSolar);
   $('btn-now').addEventListener('click', () => {
     state.anchorTime = Date.now();
