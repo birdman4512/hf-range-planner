@@ -109,7 +109,12 @@ export function analyzePath(env) {
 
   const mufMhz = Math.max(mufF2, mufE);
   // LUF from total absorption: solve (Kabs·Σ)/(f+fH)² = threshold for f.
-  const lufRaw = Math.sqrt((KABS * absSum) / ABS_THRESHOLD) - FH;
+  // Higher TX power tolerates more absorption (≈10·log10(P/100) dB vs 100 W
+  // reference), lowering the LUF and extending usable reach on absorption-limited
+  // paths. (It does not raise the MUF — you can't out-power the F2 ceiling.)
+  const powerW = env.powerW || 100;
+  const absThreshold = Math.max(5, ABS_THRESHOLD + 10 * Math.log10(powerW / 100));
+  const lufRaw = Math.sqrt((KABS * absSum) / absThreshold) - FH;
   const lufMhz = Math.max(1.6, lufRaw);
   const fotMhz = 0.85 * mufMhz;
 
@@ -182,7 +187,7 @@ export function pathReliability(analysis, freqMhz) {
  * graded coverage (a faint reach area plus a brighter sweet-spot ring) rather
  * than a flat blob. NVIS near-in coverage appears as a span starting near 0.
  */
-export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar,
+export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, powerW = 100,
                                     azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
   const sectors = [];
   let maxReachKm = 0;
@@ -192,7 +197,7 @@ export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar,
     let reachInner = 0, reachOuter = 0, goodInner = 0, goodOuter = 0;
     for (let d = dStepKm; d <= MAX_TOTAL_KM; d += dStepKm) {
       const [rxLat, rxLon] = destinationPoint(txLat, txLon, az, d);
-      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar });
+      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW });
       if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz) {
         if (!reachInner) reachInner = d;
         reachOuter = d;

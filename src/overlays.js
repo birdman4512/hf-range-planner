@@ -151,7 +151,7 @@ export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } =
   const core = arcGeometries(txLat, txLon, azStepDeg, sectors,
     sectors.map((s) => s.goodInner), sectors.map((s) => s.goodOuter));
 
-  const reachStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.5, interactive: false };
+  const reachStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.65, interactive: false };
   const coreStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity, interactive: false };
 
   const items = [];

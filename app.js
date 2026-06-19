@@ -45,21 +45,32 @@ function initMap() {
   });
 }
 
+// Pins are mirrored onto adjacent world copies so they stay visible as the map
+// wraps (the main pin is draggable; the ghosts just follow).
+const GHOST_OFFSETS = [-360, 360];
+
 function setPoint(which, p) {
   state[which] = p;
   $(`${which}-coords`).textContent = `${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}`;
 
-  if (state.markers[which]) {
-    state.markers[which].setLatLng([p.lat, p.lon]);
+  const entry = state.markers[which];
+  if (entry) {
+    entry.main.setLatLng([p.lat, p.lon]);
+    entry.ghosts.forEach((g, i) => g.setLatLng([p.lat, p.lon + GHOST_OFFSETS[i]]));
   } else {
-    const m = L.marker([p.lat, p.lon], { draggable: true, icon: pinIcon(which) }).addTo(state.map);
-    m.on('dragend', () => {
-      const ll = m.getLatLng();
+    const main = L.marker([p.lat, p.lon], { draggable: true, icon: pinIcon(which) }).addTo(state.map);
+    const syncGhosts = (lat, lon) =>
+      state.markers[which].ghosts.forEach((g, i) => g.setLatLng([lat, lon + GHOST_OFFSETS[i]]));
+    main.on('drag', () => { const ll = main.getLatLng(); syncGhosts(ll.lat, ll.lng); });
+    main.on('dragend', () => {
+      const ll = main.getLatLng();
       state[which] = { lat: +ll.lat.toFixed(3), lon: +ll.lng.toFixed(3) };
       $(`${which}-coords`).textContent =
         `${state[which].lat.toFixed(2)}, ${state[which].lon.toFixed(2)}`;
     });
-    state.markers[which] = m;
+    const ghosts = GHOST_OFFSETS.map((d) =>
+      L.marker([p.lat, p.lon + d], { icon: pinIcon(which), interactive: false, keyboard: false }).addTo(state.map));
+    state.markers[which] = { main, ghosts };
   }
 }
 
@@ -123,8 +134,9 @@ function runCoverage() {
   const { ssn, kp } = getConditions();
   const subsolar = getSubsolar();
   const freq = Number($('in-freq').value) || nearestBand(14).mhz;
+  const powerW = Number($('in-power').value) || 100;
 
-  const fp = coverageFootprint({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: freq, ssn, kp, subsolar });
+  const fp = coverageFootprint({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: freq, ssn, kp, subsolar, powerW });
   const nvis = nvisCeilingMhz({ txLat: state.tx.lat, txLon: state.tx.lon, ssn, kp, subsolar });
 
   clearResultLayer();
@@ -173,8 +185,9 @@ function runPath() {
   if (!state.a || !state.b) { $('path-results').innerHTML = '<p class="hint">Set both A and B.</p>'; return; }
   const { ssn, kp } = getConditions();
   const subsolar = getSubsolar();
+  const powerW = Number($('in-power').value) || 100;
   const analysis = analyzePath({
-    lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon, ssn, kp, subsolar,
+    lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon, ssn, kp, subsolar, powerW,
   });
 
   const useClutter = $('lyr-clutter').checked;
@@ -225,7 +238,7 @@ function runPath() {
     tr.addEventListener('click', () => {
       for (const r of $('path-results').querySelectorAll('.band-row')) r.classList.remove('selected');
       tr.classList.add('selected');
-      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar });
+      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW });
     });
   }
 }
@@ -237,12 +250,12 @@ function clearBandCoverage() {
   }
 }
 
-function showBandCoverage(freqMhz, { ssn, kp, subsolar }) {
+function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW }) {
   clearBandCoverage();
   const grp = L.layerGroup();
   for (const [pt, color] of [[state.a, '#3fb950'], [state.b, '#f7a32f']]) {
     if (!pt) continue;
-    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar });
+    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW });
     makeFootprint(fp, { color, opacity: 0.26 }).addTo(grp);
   }
   grp.addTo(state.map);
