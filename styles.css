@@ -27,14 +27,16 @@ html, body {
   font: 14px/1.45 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
 }
 
-#app { position: relative; display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; transition: grid-template-columns .2s ease; }
+#app { position: relative; display: grid; grid-template-columns: var(--sidebar-w) 1fr; height: 100vh; overflow: hidden; transition: grid-template-columns .2s ease; }
 #app.collapsed { grid-template-columns: 0 1fr; }
 #app.collapsed #sidebar { transform: translateX(-100%); }
 
 #sidebar {
+  width: var(--sidebar-w);
   background: var(--panel);
   border-right: 1px solid var(--border);
   overflow-y: auto;
+  overflow-x: hidden;
   display: flex;
   flex-direction: column;
   transition: transform .2s ease;
@@ -94,41 +96,44 @@ label {
   min-width: 0;
 }
 
-/* Toggle switches for layers */
-.toggle {
-  flex-direction: row;
+/* Layer toggles as buttons that highlight when enabled */
+.layer-btns { display: flex; flex-direction: column; gap: 8px; }
+.layer-btn {
+  display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 13px;
-  color: var(--text);
-  padding: 7px 0;
-  cursor: pointer;
-}
-.toggle + .toggle { border-top: 1px solid var(--border); }
-.toggle-label { flex: 1; }
-.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
-.switch {
-  flex: none;
-  width: 38px; height: 22px;
-  border-radius: 999px;
-  background: var(--panel-2);
+  gap: 9px;
+  padding: 9px 11px;
   border: 1px solid var(--border);
-  position: relative;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .15s ease, border-color .15s ease, color .15s ease;
+}
+.layer-btn input { position: absolute; opacity: 0; width: 0; height: 0; }
+.layer-btn::before {
+  content: '';
+  flex: none;
+  width: 16px; height: 16px;
+  border-radius: 5px;
+  border: 1.5px solid var(--muted);
+  background: transparent;
   transition: background .15s ease, border-color .15s ease;
 }
-.switch::after {
-  content: '';
-  position: absolute;
-  top: 2px; left: 2px;
-  width: 16px; height: 16px;
-  border-radius: 50%;
-  background: var(--muted);
-  transition: transform .15s ease, background .15s ease;
+.layer-btn:hover { border-color: var(--accent); }
+.layer-btn:has(input:checked) {
+  background: rgba(47,129,247,.16);
+  border-color: var(--accent);
+  color: #fff;
 }
-.toggle input:checked + .switch { background: rgba(47,129,247,.35); border-color: var(--accent); }
-.toggle input:checked + .switch::after { transform: translateX(16px); background: var(--accent); }
-.toggle input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+.layer-btn:has(input:checked)::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--panel-2);
+}
+.layer-btn:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 input, select {
   height: var(--ctrl-h);

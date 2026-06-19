@@ -1,8 +1,11 @@
-// sw.js — service worker for offline app-shell caching (PWA).
-// Same-origin shell is cache-first; cross-origin (tiles, SWPC, KC2G, unpkg) is
-// always network so live data and maps stay fresh.
+// sw.js — service worker for PWA offline support.
+// Network-first for same-origin requests so online users always get the latest
+// deploy; falls back to cache when offline. Cross-origin (tiles, SWPC, KC2G,
+// unpkg) always goes straight to the network.
+//
+// NOTE: bump CACHE whenever the precached shell list changes.
 
-const CACHE = 'hf-range-planner-v1';
+const CACHE = 'hf-range-planner-v2';
 const SHELL = [
   './',
   './index.html',
@@ -37,21 +40,18 @@ self.addEventListener('fetch', (e) => {
   const { request } = e;
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return; // let cross-origin hit network
 
-  // Only manage our own origin; let everything else hit the network directly.
-  if (url.origin !== self.location.origin) return;
-
+  // Network-first: fetch fresh, cache a copy, fall back to cache when offline.
   e.respondWith(
-    caches.match(request).then((hit) =>
-      hit ||
-      fetch(request).then((res) => {
-        // Runtime-cache successful same-origin responses.
+    fetch(request)
+      .then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(request, copy));
         }
         return res;
-      }).catch(() => caches.match('./index.html'))
-    )
+      })
+      .catch(() => caches.match(request).then((hit) => hit || caches.match('./index.html')))
   );
 });

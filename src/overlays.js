@@ -66,27 +66,37 @@ function circMean(arr, w) {
   });
 }
 
+// Keep a ring's longitudes continuous so polygons that cross the ±180° date
+// line don't draw a chord across the whole map (Leaflet handles lon outside
+// [-180,180] fine via worldCopyJump).
+function unwrapLon(points) {
+  let prev = null;
+  return points.map(([lat, lon]) => {
+    if (prev !== null) {
+      while (lon - prev > 180) lon -= 360;
+      while (lon - prev < -180) lon += 360;
+    }
+    prev = lon;
+    return [lat, lon];
+  });
+}
+
 /**
- * Render a coverage footprint as one smoothed filled wedge per open azimuth
- * (inner = skip-zone edge, outer = reach). Radii are median+mean smoothed so
- * neighbouring wedges merge into a continuous region; closed directions draw no
- * wedge (true gaps). Per-wedge rendering avoids antipodal-wrap artifacts and
- * chords across closed arcs. Pass { color, opacity } to tint (e.g. dual A/B).
+ * Render one smoothed coverage tier (inner/outer reach per azimuth) as seamless
+ * filled polygons: each contiguous open arc becomes a single polygon (no
+ * internal radial seams), with real gaps between arcs (no chords) and date-line
+ * safe longitudes. Returns an array of L.polygon.
  */
-export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } = {}) {
-  const { txLat, txLon, azStepDeg, sectors } = footprint;
+function arcPolygons(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw, style) {
   const n = sectors.length;
-  if (!n) return L.layerGroup([]);
-
-  const outer = circMean(medianSmooth(sectors.map((s) => (s.intervals.length ? s.intervals.at(-1)[1] : 0))), 3);
-  const inner = circMean(medianSmooth(sectors.map((s) => (s.intervals.length ? s.intervals[0][0] : 0))), 2);
-
-  const style = { color, weight: 0, fillColor: color, fillOpacity: opacity };
+  const outer = circMean(medianSmooth(outerRaw), 3);
+  const inner = circMean(medianSmooth(innerRaw), 2);
   const arcStep = Math.min(2, azStepDeg / 2);
   const dest = (az, d) => destinationPoint(txLat, txLon, az, Math.max(1, d));
   const open = outer.map((v) => v > 50);
+  if (!open.some(Boolean)) return [];
 
-  // Fully open in every direction → one seamless annulus with a skip-zone hole.
+  // Fully open → one seamless annulus with a skip-zone hole.
   if (open.every(Boolean)) {
     const outerRing = [], innerRing = [];
     for (let i = 0; i < n; i++) {
@@ -94,42 +104,61 @@ export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } =
       outerRing.push(dest(azc, outer[i]));
       innerRing.push(dest(azc, inner[i]));
     }
-    return L.layerGroup([L.polygon([outerRing, innerRing.reverse()], style)]);
+    return [L.polygon([unwrapLon(outerRing), unwrapLon(innerRing.reverse())], style)];
   }
-  if (!open.some(Boolean)) return L.layerGroup([]);
 
-  // Otherwise render each contiguous open arc as ONE polygon (no internal radial
-  // seams), leaving real gaps between arcs (no chords). Anchor at a closed
-  // sector so circular runs are handled linearly.
+  // Otherwise one polygon per contiguous open arc. Anchor at a closed sector.
   let start = 0;
   while (open[start]) start++;
   const order = Array.from({ length: n }, (_, k) => (start + k) % n);
-
-  const group = [];
+  const polys = [];
   let run = [];
   const flush = () => {
     if (!run.length) return;
     const pts = [];
-    for (const idx of run) {                        // outer boundary, forward
+    for (const idx of run) {
       const a0 = sectors[idx].azimuth, a1 = a0 + azStepDeg;
       for (let az = a0; az <= a1 + 1e-6; az += arcStep) pts.push(dest(az, outer[idx]));
     }
-    for (let r = run.length - 1; r >= 0; r--) {     // inner boundary, back
+    for (let r = run.length - 1; r >= 0; r--) {
       const idx = run[r], a0 = sectors[idx].azimuth, a1 = a0 + azStepDeg;
       for (let az = a1; az >= a0 - 1e-6; az -= arcStep) pts.push(dest(az, inner[idx]));
     }
-    group.push(L.polygon(pts, style));
+    polys.push(L.polygon(unwrapLon(pts), style));
     run = [];
   };
   for (const idx of order) (open[idx] ? run.push(idx) : flush());
   flush();
-  return L.layerGroup(group);
+  return polys;
+}
+
+/**
+ * Render a coverage footprint with graded reliability: a faint full-reach area
+ * plus a brighter "reliable core" near the FOT sweet-spot. Pass { color, opacity }
+ * to tint (e.g. dual A/B coverage).
+ */
+export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } = {}) {
+  const { txLat, txLon, azStepDeg, sectors } = footprint;
+  if (!sectors.length) return L.layerGroup([]);
+
+  const reach = arcPolygons(
+    txLat, txLon, azStepDeg, sectors,
+    sectors.map((s) => s.reachInner), sectors.map((s) => s.reachOuter),
+    { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.5 },
+  );
+  const core = arcPolygons(
+    txLat, txLon, azStepDeg, sectors,
+    sectors.map((s) => s.goodInner), sectors.map((s) => s.goodOuter),
+    { color, weight: 0, fillColor: color, fillOpacity: opacity },
+  );
+  return L.layerGroup([...reach, ...core]);
 }
 
 /** Render a great-circle path with hop reflection points. Returns a LayerGroup. */
 export function makePath(a, b, analysis) {
   const items = [];
-  items.push(L.polyline([[a.lat, a.lon], [b.lat, b.lon]], { color: '#2f81f7', weight: 3, opacity: 0.9 }));
+  const line = unwrapLon([[a.lat, a.lon], [b.lat, b.lon]]);
+  items.push(L.polyline(line, { color: '#2f81f7', weight: 3, opacity: 0.9 }));
   for (const [lat, lon] of analysis.groundPoints) {
     items.push(L.circleMarker([lat, lon], {
       radius: 4, color: '#f7a32f', fillColor: '#f7a32f', fillOpacity: 0.9, weight: 1,

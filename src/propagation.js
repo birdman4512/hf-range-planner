@@ -162,40 +162,51 @@ export function bandStatus(analysis, freqMhz) {
 }
 
 /**
- * Build a coverage footprint for a TX site at a single frequency: for each
- * azimuth, the ground-distance intervals (km) that are reachable (LUF ≤ f ≤ MUF).
- * Returns sectors the UI renders as ring/annulus polygons; NVIS near-in coverage
- * appears naturally as an interval starting near 0.
+ * Reliability proxy in [0,1] for working a path at frequency f: best near the
+ * FOT (≈0.85·MUF), tapering to the LUF/MUF edges, with a penalty per extra hop.
+ * 0 means the frequency is outside the usable [LUF, MUF] window.
+ */
+export function pathReliability(analysis, freqMhz) {
+  const { lufMhz, mufMhz, fotMhz, hopCount } = analysis;
+  if (freqMhz < lufMhz || freqMhz > mufMhz) return 0;
+  const span = Math.max(fotMhz - lufMhz, mufMhz - fotMhz, 0.1);
+  const proximity = Math.max(0, 1 - Math.abs(freqMhz - fotMhz) / span);
+  const hopPenalty = Math.max(0.2, 1 - 0.12 * (hopCount - 1));
+  return Math.max(0, Math.min(1, proximity * hopPenalty));
+}
+
+/**
+ * Build a coverage footprint for a TX site at a single frequency. For each
+ * azimuth it records the reachable span (LUF ≤ f ≤ MUF) and, within it, the
+ * "reliable core" span where the reliability proxy is high — so the UI can show
+ * graded coverage (a faint reach area plus a brighter sweet-spot ring) rather
+ * than a flat blob. NVIS near-in coverage appears as a span starting near 0.
  */
 export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar,
-                                    azStepDeg = 4, dStepKm = 120 }) {
+                                    azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
   const sectors = [];
   let maxReachKm = 0;
   let skipKm = null;
 
   for (let az = 0; az < 360; az += azStepDeg) {
-    const reachable = [];
+    let reachInner = 0, reachOuter = 0, goodInner = 0, goodOuter = 0;
     for (let d = dStepKm; d <= MAX_TOTAL_KM; d += dStepKm) {
       const [rxLat, rxLon] = destinationPoint(txLat, txLon, az, d);
       const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar });
-      reachable.push(freqMhz >= a.lufMhz && freqMhz <= a.mufMhz);
+      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz) {
+        if (!reachInner) reachInner = d;
+        reachOuter = d;
+        if (pathReliability(a, freqMhz) >= goodThreshold) {
+          if (!goodInner) goodInner = d;
+          goodOuter = d;
+        }
+      }
     }
-    // Compress the boolean march into [d0,d1] intervals.
-    const intervals = [];
-    let start = null;
-    for (let i = 0; i < reachable.length; i++) {
-      const d = dStepKm * (i + 1);
-      if (reachable[i] && start === null) start = d;
-      if (!reachable[i] && start !== null) { intervals.push([start, d - dStepKm]); start = null; }
+    if (reachOuter > 0) {
+      maxReachKm = Math.max(maxReachKm, reachOuter);
+      if (reachInner > dStepKm && (skipKm === null || reachInner < skipKm)) skipKm = reachInner;
     }
-    if (start !== null) intervals.push([start, MAX_TOTAL_KM]);
-
-    for (const iv of intervals) {
-      maxReachKm = Math.max(maxReachKm, iv[1]);
-      // Skip distance = nearest reachable edge that isn't NVIS-from-zero.
-      if (iv[0] > dStepKm && (skipKm === null || iv[0] < skipKm)) skipKm = iv[0];
-    }
-    sectors.push({ azimuth: az, intervals });
+    sectors.push({ azimuth: az, reachInner, reachOuter, goodInner, goodOuter });
   }
 
   return { txLat, txLon, freqMhz, azStepDeg, sectors, maxReachKm, skipKm };
