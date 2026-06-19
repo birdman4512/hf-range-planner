@@ -148,7 +148,7 @@ function getCoverageEnv() {
     ssn, kp,
     subsolar: getSubsolar(),
     powerW: Number($('in-power').value) || 100,
-    minTakeoffDeg: Number($('in-takeoff').value) || 5,
+    minTakeoffDeg: Number($('in-takeoff').value) || 3,
   };
 }
 
@@ -224,7 +224,7 @@ function runPath() {
   const { ssn, kp } = getConditions();
   const subsolar = getSubsolar();
   const powerW = Number($('in-power').value) || 100;
-  const minTakeoffDeg = Number($('in-takeoff').value) || 5;
+  const minTakeoffDeg = Number($('in-takeoff').value) || 3;
   const analysis = analyzePath({
     lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon,
     ssn, kp, subsolar, powerW, minTakeoffDeg,

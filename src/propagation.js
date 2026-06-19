@@ -13,6 +13,7 @@ const R = EARTH_RADIUS_KM;
 const KABS = 250;          // absorption dB scaling constant
 const FH = 1.0;            // electron gyro-frequency (MHz), absorption denominator
 const ABS_THRESHOLD = 25;  // dB of absorption tolerated before a path is "below LUF"
+const MUF_GRACE = 1.05;    // usable a few % above the median MUF part of the time
 const MAX_TOTAL_KM = 13000;
 
 /**
@@ -205,7 +206,9 @@ export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, po
     for (let d = dStepKm; d <= MAX_TOTAL_KM; d += dStepKm) {
       const [rxLat, rxLon] = destinationPoint(txLat, txLon, az, d);
       const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW, minTakeoffDeg });
-      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz) {
+      // MUF is a median; working a few % above it succeeds part of the time, so a
+      // small grace softens the otherwise all-or-nothing edge on the high bands.
+      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz * MUF_GRACE) {
         if (!reachInner) reachInner = d;
         reachOuter = d;
         if (pathReliability(a, freqMhz) >= goodThreshold) {
