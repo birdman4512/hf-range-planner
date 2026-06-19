@@ -257,6 +257,32 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 .dot-a { background: var(--a); }
 .dot-b { background: var(--b); }
 
+/* Site card "set" state — makes it obvious whether A/B/TX are placed. */
+.site .coords { color: var(--text); }
+.site:not(.is-set) .coords { color: var(--warn); font-style: italic; }
+.site.is-set { border-color: var(--good); }
+
+/* Band toggle chips (coverage mode) */
+.band-toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.band-chip {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.band-chip .chip-sw { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.band-chip:hover { color: #fff; }
+.band-chip.on { color: #fff; font-weight: 600; background: var(--panel); }
+
+/* Legend dots in coverage results (colour set from JS) */
+.bdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+
 #caveat { margin-top: auto; padding: 12px 16px; color: var(--muted); font-size: 11px; }
 
 #map { height: 100%; width: 100%; background: #0a0d11; }

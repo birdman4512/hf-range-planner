@@ -1,12 +1,10 @@
 // app.js — UI bootstrap and orchestration. Imports the pure engine modules and
 // wires them to the Leaflet map and the sidebar controls.
 
-import { subsolarPoint } from './src/geo.js';
+import { subsolarPoint, destinationPoint } from './src/geo.js';
 import { fetchSpaceWeather, ssnFromSfi } from './src/solar.js';
-import { BANDS, bandByName, nearestBand } from './src/bands.js';
-import {
-  analyzePath, coverageFootprint, bandStatus, pathAbsorptionDb, nvisCeilingMhz,
-} from './src/propagation.js';
+import { BANDS } from './src/bands.js';
+import { analyzePath, coverageFootprint, bandStatus } from './src/propagation.js';
 import { groundReflectionLossDb } from './src/clutter.js';
 import { makeTerminator, makeKc2gOverlay, makeFootprint, makePath } from './src/overlays.js';
 
@@ -18,6 +16,8 @@ const state = {
   mode: 'coverage',
   tx: null, a: null, b: null,
   picking: null,
+  activeBands: new Set(),
+  bandLayers: {},
   markers: { tx: null, a: null, b: null },
   layers: { terminator: null, kc2g: null, result: null, bandCoverage: null },
 };
@@ -32,7 +32,9 @@ const pinIcon = (which) => L.divIcon({
 // --- Map -----------------------------------------------------------------
 
 function initMap() {
-  state.map = L.map('map', { worldCopyJump: true, minZoom: 2 }).setView([30, 0], 3);
+  // No worldCopyJump: overlays are drawn on world copies ourselves, and the
+  // jump-recentre it does caused a visible flicker when panning across ±180°.
+  state.map = L.map('map', { minZoom: 2 }).setView([30, 0], 3);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 12, attribution: '© OpenStreetMap contributors',
   }).addTo(state.map);
@@ -49,9 +51,15 @@ function initMap() {
 // wraps (the main pin is draggable; the ghosts just follow).
 const GHOST_OFFSETS = [-360, 360];
 
+function markSet(which) {
+  const card = $(`site-${which}`);
+  if (card) card.classList.add('is-set');
+}
+
 function setPoint(which, p) {
   state[which] = p;
   $(`${which}-coords`).textContent = `${p.lat.toFixed(2)}, ${p.lon.toFixed(2)}`;
+  markSet(which);
 
   const entry = state.markers[which];
   if (entry) {
@@ -67,11 +75,13 @@ function setPoint(which, p) {
       state[which] = { lat: +ll.lat.toFixed(3), lon: +ll.lng.toFixed(3) };
       $(`${which}-coords`).textContent =
         `${state[which].lat.toFixed(2)}, ${state[which].lon.toFixed(2)}`;
+      if (which === 'tx') renderActiveBands();
     });
     const ghosts = GHOST_OFFSETS.map((d) =>
       L.marker([p.lat, p.lon + d], { icon: pinIcon(which), interactive: false, keyboard: false }).addTo(state.map));
     state.markers[which] = { main, ghosts };
   }
+  if (which === 'tx') renderActiveBands();
 }
 
 // --- Conditions / time ---------------------------------------------------
@@ -120,6 +130,7 @@ async function loadSolar() {
   } else {
     $('solar-status').textContent = `Live fetch failed — using defaults. Edit values to override.`;
   }
+  renderActiveBands();
 }
 
 // --- Mode A: coverage footprint ------------------------------------------
@@ -129,42 +140,62 @@ function clearResultLayer() {
   clearBandCoverage();
 }
 
-function runCoverage() {
-  if (!state.tx) { $('coverage-results').innerHTML = '<p class="hint">Set a TX site first.</p>'; return; }
+function getCoverageEnv() {
   const { ssn, kp } = getConditions();
-  const subsolar = getSubsolar();
-  const freq = Number($('in-freq').value) || nearestBand(14).mhz;
-  const powerW = Number($('in-power').value) || 100;
+  return { ssn, kp, subsolar: getSubsolar(), powerW: Number($('in-power').value) || 100 };
+}
 
-  const fp = coverageFootprint({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: freq, ssn, kp, subsolar, powerW });
-  const nvis = nvisCeilingMhz({ txLat: state.tx.lat, txLon: state.tx.lon, ssn, kp, subsolar });
+function clearBandLayers() {
+  for (const k of Object.keys(state.bandLayers)) {
+    state.map.removeLayer(state.bandLayers[k]);
+    delete state.bandLayers[k];
+  }
+}
 
-  clearResultLayer();
-  state.layers.result = makeFootprint(fp).addTo(state.map);
+// Why is a band giving no coverage right now? Sample a representative 2500 km
+// path due east of the TX to see whether it's above the MUF or D-layer absorbed.
+function bandDiagnosis(band, env) {
+  const [rxLat, rxLon] = destinationPoint(state.tx.lat, state.tx.lon, 90, 2500);
+  const a = analyzePath({ lat1: state.tx.lat, lon1: state.tx.lon, lat2: rxLat, lon2: rxLon, ...env });
+  if (band.mhz > a.mufMhz) return 'above MUF — try in daylight or a lower band';
+  if (band.mhz < a.lufMhz) return 'D-layer absorbed — try after dark';
+  return 'closed here, open on other paths';
+}
 
-  const skip = fp.skipKm ? `${Math.round(fp.skipKm)} km` : 'none (local coverage)';
-  const maxr = fp.maxReachKm ? `${Math.round(fp.maxReachKm)} km` : '—';
-  const nvisOk = freq <= nvis;
-  const vhfNote = freq > 30
-    ? `<p class="hint">${freq.toFixed(0)} MHz is above the HF range — regular F2 skip is rare here.
-       Real openings on 6 m are usually <b>sporadic-E</b> or tropo, which this model does not predict,
-       so an empty footprint is expected most of the time.</p>`
-    : '';
-  const noReach = !fp.maxReachKm
-    ? `<p class="hint">No skywave coverage for this frequency, time and conditions
-       (likely above the MUF — try a lower band or daytime).</p>`
-    : '';
-  $('coverage-results').innerHTML = `
-    <table>
-      <tr><td>Frequency</td><td><b>${freq.toFixed(2)} MHz</b> (${nearestBand(freq).label})</td></tr>
-      <tr><td>Skip distance</td><td>${skip}</td></tr>
-      <tr><td>Max reach</td><td>${maxr}</td></tr>
-      <tr><td>NVIS (overhead foF2)</td><td>${nvis.toFixed(1)} MHz — ${nvisOk
-        ? '<span class="pill open">local coverage</span>'
-        : '<span class="pill closed">skips over</span>'}</td></tr>
-    </table>
-    ${noReach}${vhfNote}
-    <p class="hint">Shaded region = where this frequency lands. The gap nearest TX is the skip zone.</p>`;
+function renderActiveBands() {
+  clearBandLayers();
+  if (!state.tx) { $('coverage-results').innerHTML = '<p class="hint">Set a TX site first.</p>'; return; }
+  if (!state.activeBands.size) { $('coverage-results').innerHTML = ''; return; }
+
+  const env = getCoverageEnv();
+  const openRows = [];
+  const closedRows = [];
+  for (const b of BANDS) {
+    if (!state.activeBands.has(b.name)) continue;
+    const fp = coverageFootprint({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: b.mhz, ...env });
+    if (fp.maxReachKm) {
+      state.bandLayers[b.name] = makeFootprint(fp, { color: b.color, opacity: 0.34 }).addTo(state.map);
+      const skip = fp.skipKm ? `skip ${Math.round(fp.skipKm)} km` : 'local';
+      openRows.push(`<tr><td><span class="bdot" data-band="${b.name}"></span>${b.label}</td>` +
+        `<td>${Math.round(fp.maxReachKm)} km</td><td>${skip}</td></tr>`);
+    } else {
+      closedRows.push(`<tr><td><span class="bdot" data-band="${b.name}"></span>${b.label}</td>` +
+        `<td colspan="2"><span class="pill closed">closed</span> ${bandDiagnosis(b, env)}</td></tr>`);
+    }
+  }
+  $('coverage-results').innerHTML =
+    (openRows.length ? `<table><tr><th>Band</th><th>Reach</th><th></th></tr>${openRows.join('')}</table>` : '') +
+    (closedRows.length ? `<table>${closedRows.join('')}</table>` : '') +
+    `<p class="hint">Each band's filled region = where it lands; the gap by the TX is the skip zone.</p>`;
+  colourBandDots();
+}
+
+// Colour the legend dots in the results table (JS-set styles are CSP-safe).
+function colourBandDots() {
+  for (const dot of document.querySelectorAll('.bdot')) {
+    const band = BANDS.find((b) => b.name === dot.dataset.band);
+    if (band) dot.style.background = band.color;
+  }
 }
 
 // --- Mode B: point-to-point best band ------------------------------------
@@ -197,7 +228,11 @@ function runPath() {
 
   clearResultLayer();
   state.layers.result = makePath(state.a, state.b, analysis).addTo(state.map);
-  state.map.fitBounds(L.latLngBounds([state.a.lat, state.a.lon], [state.b.lat, state.b.lon]).pad(0.3));
+  // Frame the path without zooming so far out that the world repeats.
+  state.map.fitBounds(
+    L.latLngBounds([state.a.lat, state.a.lon], [state.b.lat, state.b.lon]),
+    { padding: [50, 50], maxZoom: 6 },
+  );
 
   // Best band: open band nearest FOT.
   const open = BANDS.filter((b) => bandStatus(analysis, b.mhz) === 'open');
@@ -300,17 +335,42 @@ function setMode(mode) {
   $('tab-path').classList.toggle('active', mode === 'path');
   $('mode-coverage').classList.toggle('hidden', mode !== 'coverage');
   $('mode-path').classList.toggle('hidden', mode !== 'path');
-  clearResultLayer();
+  if (mode === 'path') {
+    clearBandLayers();
+  } else {
+    clearResultLayer();
+    renderActiveBands();
+  }
 }
 
-// --- Band selector -------------------------------------------------------
+// --- Band toggle chips (coverage mode) -----------------------------------
 
-function initBands() {
-  const sel = $('in-band');
-  sel.innerHTML = BANDS.map((b) => `<option value="${b.name}">${b.label}</option>`).join('');
-  sel.value = '20m';
-  $('in-freq').value = bandByName('20m').mhz;
-  sel.addEventListener('change', () => { $('in-freq').value = bandByName(sel.value).mhz; });
+function initBandToggles() {
+  const cont = $('band-toggles');
+  cont.innerHTML = '';
+  for (const b of BANDS) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'band-chip';
+    chip.dataset.band = b.name;
+    const sw = document.createElement('span');
+    sw.className = 'chip-sw';
+    sw.style.background = b.color; // JS-set style is CSP-safe
+    const lbl = document.createElement('span');
+    lbl.textContent = b.label;
+    chip.append(sw, lbl);
+    chip.addEventListener('click', () => toggleBand(b, chip));
+    cont.appendChild(chip);
+  }
+}
+
+function toggleBand(band, chip) {
+  if (!state.tx) { $('coverage-results').innerHTML = '<p class="hint">Set a TX site first.</p>'; return; }
+  const on = !state.activeBands.has(band.name);
+  if (on) state.activeBands.add(band.name); else state.activeBands.delete(band.name);
+  chip.classList.toggle('on', on);
+  chip.style.borderColor = on ? band.color : '';
+  renderActiveBands();
 }
 
 // --- Wire up -------------------------------------------------------------
@@ -325,13 +385,21 @@ function wire() {
   $('btn-loc-tx').addEventListener('click', () => geolocate('tx'));
   $('btn-loc-a').addEventListener('click', () => geolocate('a'));
 
-  $('btn-run-coverage').addEventListener('click', runCoverage);
   $('btn-run-path').addEventListener('click', runPath);
 
+  // Inputs that change conditions re-render the active coverage bands live.
+  const refresh = () => renderActiveBands();
+  $('in-power').addEventListener('change', refresh);
+  $('in-ssn').addEventListener('change', refresh);
+  $('in-kp').addEventListener('change', refresh);
+
   $('btn-refresh-solar').addEventListener('click', loadSolar);
-  $('btn-now').addEventListener('click', () => { setTimeInput(new Date()); redrawTerminator(); });
-  $('in-time').addEventListener('change', redrawTerminator);
-  $('in-sfi').addEventListener('change', () => { $('in-ssn').value = ssnFromSfi(Number($('in-sfi').value) || 0); });
+  $('btn-now').addEventListener('click', () => { setTimeInput(new Date()); redrawTerminator(); refresh(); });
+  $('in-time').addEventListener('change', () => { redrawTerminator(); refresh(); });
+  $('in-sfi').addEventListener('change', () => {
+    $('in-ssn').value = ssnFromSfi(Number($('in-sfi').value) || 0);
+    refresh();
+  });
 
   $('lyr-terminator').addEventListener('change', redrawTerminator);
   $('lyr-kc2g').addEventListener('change', toggleKc2g);
@@ -357,7 +425,7 @@ function registerServiceWorker() {
 
 async function main() {
   initMap();
-  initBands();
+  initBandToggles();
   setTimeInput(new Date());
   wire();
   redrawTerminator();

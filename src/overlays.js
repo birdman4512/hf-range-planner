@@ -137,27 +137,21 @@ function arcGeometries(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw) {
 const shiftGeom = (geom, d) => geom.map((ring) => shiftLon(ring, d));
 
 /**
- * Render a coverage footprint with graded reliability: a faint full-reach area
- * plus a brighter "reliable core" near the FOT sweet-spot. Drawn on every world
- * copy so the pattern wraps continuously around the globe as the user pans.
- * Pass { color, opacity } to tint (e.g. dual A/B coverage).
+ * Render a coverage footprint as one clean filled region (the reachable area
+ * with a skip-zone hole), drawn on every world copy so it wraps continuously as
+ * the user pans. Pass { color, opacity } to tint per band.
  */
 export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } = {}) {
   const { txLat, txLon, azStepDeg, sectors } = footprint;
   if (!sectors.length) return L.layerGroup([]);
 
-  const reach = arcGeometries(txLat, txLon, azStepDeg, sectors,
+  const geoms = arcGeometries(txLat, txLon, azStepDeg, sectors,
     sectors.map((s) => s.reachInner), sectors.map((s) => s.reachOuter));
-  const core = arcGeometries(txLat, txLon, azStepDeg, sectors,
-    sectors.map((s) => s.goodInner), sectors.map((s) => s.goodOuter));
 
-  const reachStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.65, interactive: false };
-  const coreStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity, interactive: false };
-
+  const style = { color, weight: 0, fillColor: color, fillOpacity: opacity, interactive: false };
   const items = [];
   for (const d of WORLD_COPIES) {
-    for (const g of reach) items.push(L.polygon(shiftGeom(g, d), reachStyle));
-    for (const g of core) items.push(L.polygon(shiftGeom(g, d), coreStyle));
+    for (const g of geoms) items.push(L.polygon(shiftGeom(g, d), style));
   }
   return L.layerGroup(items);
 }

@@ -74,8 +74,8 @@
 
         <!-- Mode A: frequency -> footprint -->
         <div class="mode-body" id="mode-coverage">
-          <p class="hint">Set a TX site, pick a frequency, see where the signal lands.</p>
-          <div class="site">
+          <p class="hint">Set a TX site, then toggle bands to map where each lands.</p>
+          <div class="site" id="site-tx">
             <span class="site-tag pin pin-tx">TX</span>
             <span id="tx-coords" class="coords">not set</span>
             <div class="site-actions">
@@ -83,28 +83,17 @@
               <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
             </div>
           </div>
-          <div class="grid2">
-            <label>Band
-              <select id="in-band"></select>
-            </label>
-            <label>Freq (MHz)
-              <input type="number" id="in-freq" min="1.8" max="30" step="0.1" />
-            </label>
-            <label>TX power (W)
-              <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
-            </label>
-            <label>Takeoff (°)
-              <input type="number" id="in-takeoff" min="1" max="45" step="1" value="15" />
-            </label>
-          </div>
-          <button type="button" id="btn-run-coverage" class="primary">Compute coverage</button>
+          <label>TX power (W)
+            <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
+          </label>
+          <div class="band-toggles" id="band-toggles"></div>
           <div class="results" id="coverage-results"></div>
         </div>
 
         <!-- Mode B: two points -> band -->
         <div class="mode-body hidden" id="mode-path">
           <p class="hint">Drop two markers; get the best band for that path right now.</p>
-          <div class="site">
+          <div class="site" id="site-a">
             <span class="site-tag pin pin-a">A</span>
             <span id="a-coords" class="coords">not set</span>
             <div class="site-actions">
@@ -112,7 +101,7 @@
               <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
             </div>
           </div>
-          <div class="site">
+          <div class="site" id="site-b">
             <span class="site-tag pin pin-b">B</span>
             <span id="b-coords" class="coords">not set</span>
             <div class="site-actions">
