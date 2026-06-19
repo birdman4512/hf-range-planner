@@ -248,7 +248,7 @@ function reliabilityPct(analysis, freq, groundLossDb) {
   return Math.max(5, Math.min(98, Math.round(r)));
 }
 
-function runPath() {
+function runPath(fit = true) {
   if (!state.a || !state.b) { $('path-results').innerHTML = '<p class="hint">Set both A and B.</p>'; return; }
   const { ssn, kp } = getConditions();
   const subsolar = getSubsolar();
@@ -266,11 +266,13 @@ function runPath() {
 
   clearResultLayer();
   state.layers.result = makePath(state.a, state.b, analysis).addTo(state.map);
-  // Frame the path without zooming so far out that the world repeats.
-  state.map.fitBounds(
-    L.latLngBounds([state.a.lat, state.a.lon], [state.b.lat, state.b.lon]),
-    { padding: [50, 50], maxZoom: 6 },
-  );
+  if (fit) {
+    // Frame the path without zooming so far out that the world repeats.
+    state.map.fitBounds(
+      L.latLngBounds([state.a.lat, state.a.lon], [state.b.lat, state.b.lon]),
+      { padding: [50, 50], maxZoom: 6 },
+    );
+  }
 
   // Best band: open band nearest FOT.
   const open = BANDS.filter((b) => bandStatus(analysis, b.mhz) === 'open');
@@ -424,11 +426,14 @@ function wire() {
   $('btn-loc-tx').addEventListener('click', () => geolocate('tx'));
   $('btn-loc-a').addEventListener('click', () => geolocate('a'));
 
-  $('btn-run-path').addEventListener('click', runPath);
+  $('btn-run-path').addEventListener('click', () => runPath(true));
 
-  // Inputs that change conditions re-render the active coverage bands live;
-  // the Recompute button is an explicit trigger for the same.
-  const refresh = () => renderActiveBands();
+  // Inputs that change conditions update whichever mode is active (Path re-runs
+  // without re-framing; Coverage re-renders its active bands).
+  const refresh = () => {
+    if (state.mode === 'path') { if (state.a && state.b) runPath(false); }
+    else renderActiveBands();
+  };
   $('btn-recompute').addEventListener('click', refresh);
   $('in-power').addEventListener('change', refresh);
   $('in-takeoff').addEventListener('change', refresh);

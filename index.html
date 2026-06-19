@@ -66,6 +66,19 @@
         </div>
       </section>
 
+      <!-- Station (applies to both modes) -->
+      <section class="panel" id="panel-station">
+        <h2>Your station</h2>
+        <div class="grid2">
+          <label>TX power (W)
+            <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
+          </label>
+          <label title="Lowest elevation angle your antenna radiates — low = more DX reach, high = NVIS/short">Min takeoff (°)
+            <input type="number" id="in-takeoff" min="1" max="60" step="1" value="3" />
+          </label>
+        </div>
+      </section>
+
       <!-- Mode switch -->
       <section class="panel" id="panel-mode">
         <div class="tabs" role="tablist">
@@ -83,14 +96,6 @@
               <button type="button" id="btn-pick-tx" class="ghost">On map</button>
               <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
             </div>
-          </div>
-          <div class="grid2">
-            <label>TX power (W)
-              <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
-            </label>
-            <label title="Lowest elevation angle your antenna radiates — low = more DX reach, high = NVIS/short">Min takeoff (°)
-              <input type="number" id="in-takeoff" min="1" max="60" step="1" value="3" />
-            </label>
           </div>
           <div class="band-toggles" id="band-toggles"></div>
           <button type="button" id="btn-recompute" class="primary">Recompute coverage</button>
