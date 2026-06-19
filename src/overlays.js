@@ -184,6 +184,60 @@ function arcGeometries(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw) {
 // Shift every ring of a geometry by dLon (for drawing across world copies).
 const shiftGeom = (geom, d) => geom.map((ring) => shiftLon(ring, d));
 
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/**
+ * Render a GLOBAL coverage grid (from propagation.coverageGrid) as a reprojected
+ * raster overlay — no range limit, and poles/antipodes render correctly (unlike
+ * polygons). The blocky grid is bilinearly smoothed and drawn on every world
+ * copy. Pass { color, opacity } to tint per band.
+ */
+export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } = {}) {
+  const { nLat, nLon, cells } = grid;
+  const [r, g, b] = hexToRgb(color);
+  const alpha = Math.round(Math.min(1, opacity) * 255);
+
+  // Equirectangular source canvas (lat +90 at the top row).
+  const eq = document.createElement('canvas');
+  eq.width = nLon; eq.height = nLat;
+  const ectx = eq.getContext('2d');
+  const id = ectx.createImageData(nLon, nLat);
+  for (let iLat = 0; iLat < nLat; iLat++) {
+    const y = nLat - 1 - iLat;
+    for (let iLon = 0; iLon < nLon; iLon++) {
+      if (cells[iLat * nLon + iLon]) {
+        const p = (y * nLon + iLon) * 4;
+        id.data[p] = r; id.data[p + 1] = g; id.data[p + 2] = b; id.data[p + 3] = alpha;
+      }
+    }
+  }
+  ectx.putImageData(id, 0, 0);
+
+  // Reproject equirectangular → Mercator (cheap canvas→canvas row copies).
+  const W = 720, H = 720;
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const ctx = cv.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  const yTop = Math.log(Math.tan(Math.PI / 4 + (MERC_MAX * Math.PI / 180) / 2));
+  for (let j = 0; j < H; j++) {
+    const my = yTop - (2 * yTop) * (j / (H - 1));
+    const lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
+    const srcRow = Math.max(0, Math.min(nLat - 1, ((90 - lat) / 180) * nLat));
+    ctx.drawImage(eq, 0, srcRow, nLon, 1, 0, j, W, 1);
+  }
+
+  const url = cv.toDataURL('image/png');
+  const group = L.layerGroup();
+  for (const d of WORLD_COPIES) {
+    L.imageOverlay(url, [[-MERC_MAX, -180 + d], [MERC_MAX, 180 + d]], { interactive: false }).addTo(group);
+  }
+  return group;
+}
+
 /**
  * Render a coverage footprint as one clean filled region (the reachable area
  * with a skip-zone hole), drawn on every world copy so it wraps continuously as

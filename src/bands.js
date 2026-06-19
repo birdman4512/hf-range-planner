@@ -17,6 +17,21 @@ export const BANDS = [
   { name: '6m', label: '6 m', mhz: 50.15, lowMhz: 50.0, highMhz: 54.0, color: '#f032e6' },
 ];
 
+/**
+ * Operating modes and their weak-signal advantage in dB relative to SSB voice.
+ * FT8 decodes ~24 dB below the noise (vs SSB ~+10 dB) — ~30 dB more sensitive —
+ * so it works much weaker, longer, further-reaching paths.
+ */
+export const MODES = [
+  { name: 'ft8', label: 'FT8 / digital', marginDb: 28 },
+  { name: 'cw', label: 'CW', marginDb: 9 },
+  { name: 'ssb', label: 'SSB voice', marginDb: 0 },
+];
+
+export function modeByName(name) {
+  return MODES.find((m) => m.name === name) || MODES[0];
+}
+
 export function bandByName(name) {
   return BANDS.find((b) => b.name === name);
 }

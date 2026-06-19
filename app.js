@@ -3,10 +3,10 @@
 
 import { subsolarPoint, destinationPoint, cosZenith } from './src/geo.js';
 import { fetchSpaceWeather, fetchForecast, ssnFromSfi } from './src/solar.js';
-import { BANDS } from './src/bands.js';
-import { analyzePath, coverageFootprint, bandStatus } from './src/propagation.js';
+import { BANDS, MODES, modeByName } from './src/bands.js';
+import { analyzePath, coverageGrid, bandStatus, mufGraceFor } from './src/propagation.js';
 import { groundReflectionLossDb } from './src/clutter.js';
-import { makeTerminator, makeKc2gOverlay, makeFootprint, makePath } from './src/overlays.js';
+import { makeTerminator, makeKc2gOverlay, makeFootprintRaster, makePath } from './src/overlays.js';
 
 const L = window.L;
 const $ = (id) => document.getElementById(id);
@@ -234,6 +234,7 @@ function getCoverageEnv() {
     subsolar: getSubsolar(),
     powerW: Number($('in-power').value) || 100,
     minTakeoffDeg: Number($('in-takeoff').value) || 3,
+    modeMarginDb: modeByName($('in-mode').value).marginDb,
   };
 }
 
@@ -266,9 +267,9 @@ function renderActiveBands() {
   const closedRows = [];
   for (const b of BANDS) {
     if (!state.activeBands.has(b.name)) continue;
-    const fp = coverageFootprint({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: b.mhz, ...env });
+    const fp = coverageGrid({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: b.mhz, ...env });
     if (fp.maxReachKm) {
-      state.bandLayers[b.name] = makeFootprint(fp, { color: b.color, opacity: 0.34 }).addTo(state.map);
+      state.bandLayers[b.name] = makeFootprintRaster(fp, { color: b.color, opacity: 0.4 }).addTo(state.map);
       const skip = fp.skipKm ? `skip ${Math.round(fp.skipKm)} km` : 'local';
       openRows.push(`<tr><td><span class="bdot" data-band="${b.name}"></span>${b.label}</td>` +
         `<td>${Math.round(fp.maxReachKm)} km</td><td>${skip}</td></tr>`);
@@ -312,9 +313,11 @@ function runPath(fit = true) {
   const subsolar = getSubsolar();
   const powerW = Number($('in-power').value) || 100;
   const minTakeoffDeg = Number($('in-takeoff').value) || 3;
+  const modeMarginDb = modeByName($('in-mode').value).marginDb;
+  const grace = mufGraceFor(modeMarginDb);
   const analysis = analyzePath({
     lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon,
-    ssn, kp, subsolar, powerW, minTakeoffDeg,
+    ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb,
   });
 
   const useClutter = $('lyr-clutter').checked;
@@ -333,13 +336,13 @@ function runPath(fit = true) {
   }
 
   // Best band: open band nearest FOT.
-  const open = BANDS.filter((b) => bandStatus(analysis, b.mhz) === 'open');
+  const open = BANDS.filter((b) => bandStatus(analysis, b.mhz, grace) === 'open');
   const best = open.length
     ? open.reduce((x, b) => (Math.abs(b.mhz - analysis.fotMhz) < Math.abs(x.mhz - analysis.fotMhz) ? b : x))
     : null;
 
   const rows = BANDS.map((b) => {
-    const st = bandStatus(analysis, b.mhz);
+    const st = bandStatus(analysis, b.mhz, grace);
     const rel = st === 'open' ? `${reliabilityPct(analysis, b.mhz, ground.totalDb)}%` : '—';
     const cls = best && b.name === best.name ? 'row-best' : '';
     return `<tr class="band-row ${cls}" data-freq="${b.mhz}"><td>${b.label}</td>` +
@@ -371,21 +374,22 @@ function runPath(fit = true) {
     tr.addEventListener('click', () => {
       for (const r of $('path-results').querySelectorAll('.band-row')) r.classList.remove('selected');
       tr.classList.add('selected');
-      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW, minTakeoffDeg });
+      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
     });
   }
 
-  $('path-results').insertAdjacentHTML('beforeend', renderBandChart(state.a, state.b, { ssn, kp, powerW, minTakeoffDeg }));
+  $('path-results').insertAdjacentHTML('beforeend', renderBandChart(state.a, state.b, { ssn, kp, powerW, minTakeoffDeg, modeMarginDb }));
 }
 
 // A 24-hour open/marginal/closed timeline for every band on the A–B path, so you
 // can see the best time to call. Diurnal change dominates; indices held constant.
-function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg }) {
+function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg, modeMarginDb }) {
   const HOURS = 24;
+  const grace = mufGraceFor(modeMarginDb);
   const analyses = [];
   for (let h = 0; h < HOURS; h++) {
     const subsolar = subsolarPoint(new Date(state.anchorTime + h * 3600000));
-    analyses.push(analyzePath({ lat1: a.lat, lon1: a.lon, lat2: b.lat, lon2: b.lon, ssn, kp, subsolar, powerW, minTakeoffDeg }));
+    analyses.push(analyzePath({ lat1: a.lat, lon1: a.lon, lat2: b.lat, lon2: b.lon, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb }));
   }
   const nowH = Math.round((state.timeUTC.getTime() - state.anchorTime) / 3600000);
   const anchorH = state.anchorTime / 3600000 + a.lon / 15; // local-at-A hour of column 0
@@ -401,7 +405,7 @@ function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg }) {
   for (const band of [...BANDS].reverse()) { // highest band on top
     body += `<tr><td class="blabel">${band.label}</td>`;
     for (let h = 0; h < HOURS; h++) {
-      const st = bandStatus(analyses[h], band.mhz);
+      const st = bandStatus(analyses[h], band.mhz, grace);
       body += `<td class="cell ${st}${h === nowH ? ' now' : ''}"></td>`;
     }
     body += '</tr>';
@@ -419,13 +423,13 @@ function clearBandCoverage() {
   }
 }
 
-function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW, minTakeoffDeg }) {
+function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb }) {
   clearBandCoverage();
   const grp = L.layerGroup();
   for (const [pt, color] of [[state.a, '#3fb950'], [state.b, '#f7a32f']]) {
     if (!pt) continue;
-    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW, minTakeoffDeg });
-    makeFootprint(fp, { color, opacity: 0.26 }).addTo(grp);
+    const fp = coverageGrid({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
+    makeFootprintRaster(fp, { color, opacity: 0.32 }).addTo(grp);
   }
   grp.addTo(state.map);
   state.layers.bandCoverage = grp;
@@ -480,6 +484,11 @@ function setMode(mode) {
 
 // --- Band toggle chips (coverage mode) -----------------------------------
 
+function initModeSelect() {
+  $('in-mode').innerHTML = MODES.map((m) => `<option value="${m.name}">${m.label}</option>`).join('');
+  $('in-mode').value = 'ft8'; // FT8 is the modern baseline most people actually use
+}
+
 function initBandToggles() {
   const cont = $('band-toggles');
   cont.innerHTML = '';
@@ -527,6 +536,7 @@ function wire() {
   $('btn-recompute').addEventListener('click', refresh);
   $('in-power').addEventListener('change', refresh);
   $('in-takeoff').addEventListener('change', refresh);
+  $('in-mode').addEventListener('change', refresh);
   $('in-ssn').addEventListener('change', refresh);
   $('in-kp').addEventListener('change', refresh);
 
@@ -578,6 +588,7 @@ function registerServiceWorker() {
 
 async function main() {
   initMap();
+  initModeSelect();
   initBandToggles();
   state.anchorTime = Date.now();
   state.timeUTC = new Date();

@@ -12,9 +12,16 @@ import { foF2, foE, hmF2, hmE, absorptionIndex } from './iono.js';
 const R = EARTH_RADIUS_KM;
 const KABS = 250;          // absorption dB scaling constant
 const FH = 1.0;            // electron gyro-frequency (MHz), absorption denominator
-const ABS_THRESHOLD = 25;  // dB of absorption tolerated before a path is "below LUF"
-const MUF_GRACE = 1.05;    // usable a few % above the median MUF part of the time
+const ABS_THRESHOLD = 25;  // dB of absorption tolerated before a path is "below LUF" (SSB ref)
 const MAX_TOTAL_KM = 13000;
+
+/**
+ * How far above the median MUF a path is still usable, given the mode's
+ * weak-signal margin (dB vs SSB). SSB ≈ 1.05; FT8 (+28 dB) ≈ 1.16.
+ */
+export function mufGraceFor(modeMarginDb = 0) {
+  return 1.05 + modeMarginDb / 250;
+}
 
 /**
  * Maximum single-hop ground range (km) for a reflection at virtual height h,
@@ -121,7 +128,7 @@ export function analyzePath(env) {
   // reference), lowering the LUF and extending usable reach on absorption-limited
   // paths. (It does not raise the MUF — you can't out-power the F2 ceiling.)
   const powerW = env.powerW || 100;
-  const absThreshold = Math.max(5, ABS_THRESHOLD + 10 * Math.log10(powerW / 100));
+  const absThreshold = Math.max(5, ABS_THRESHOLD + 10 * Math.log10(powerW / 100) + (env.modeMarginDb || 0));
   const lufRaw = Math.sqrt((KABS * absSum) / absThreshold) - FH;
   const lufMhz = Math.max(1.6, lufRaw);
   const fotMhz = 0.85 * mufMhz;
@@ -166,10 +173,11 @@ export function pathAbsorptionDb(analysis, freqMhz) {
  * Classify a band on a path: 'open' (LUF ≤ f ≤ MUF), 'marginal' (within 10%
  * of an edge) or 'closed'.
  */
-export function bandStatus(analysis, freqMhz) {
+export function bandStatus(analysis, freqMhz, mufGrace = 1) {
   const { lufMhz, mufMhz } = analysis;
-  if (freqMhz >= lufMhz && freqMhz <= mufMhz) return 'open';
-  const nearHigh = freqMhz > mufMhz && freqMhz <= mufMhz * 1.1;
+  const hi = mufMhz * mufGrace;
+  if (freqMhz >= lufMhz && freqMhz <= hi) return 'open';
+  const nearHigh = freqMhz > hi && freqMhz <= hi * 1.1;
   const nearLow = freqMhz < lufMhz && freqMhz >= lufMhz * 0.9;
   return nearHigh || nearLow ? 'marginal' : 'closed';
 }
@@ -196,19 +204,21 @@ export function pathReliability(analysis, freqMhz) {
  * than a flat blob. NVIS near-in coverage appears as a span starting near 0.
  */
 export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, powerW = 100,
-                                    minTakeoffDeg = 3, azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
+                                    minTakeoffDeg = 3, modeMarginDb = 0,
+                                    azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
   const sectors = [];
   let maxReachKm = 0;
   let skipKm = null;
+  const grace = mufGraceFor(modeMarginDb);
 
   for (let az = 0; az < 360; az += azStepDeg) {
     let reachInner = 0, reachOuter = 0, goodInner = 0, goodOuter = 0;
     for (let d = dStepKm; d <= MAX_TOTAL_KM; d += dStepKm) {
       const [rxLat, rxLon] = destinationPoint(txLat, txLon, az, d);
-      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW, minTakeoffDeg });
-      // MUF is a median; working a few % above it succeeds part of the time, so a
-      // small grace softens the otherwise all-or-nothing edge on the high bands.
-      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz * MUF_GRACE) {
+      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
+      // Usable up to mufGrace above the median MUF (mode-dependent), and down to
+      // the absorption-set LUF (also mode-dependent via the threshold).
+      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz * grace) {
         if (!reachInner) reachInner = d;
         reachOuter = d;
         if (pathReliability(a, freqMhz) >= goodThreshold) {
@@ -225,6 +235,38 @@ export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, po
   }
 
   return { txLat, txLon, freqMhz, azStepDeg, sectors, maxReachKm, skipKm };
+}
+
+/**
+ * Global coverage estimate: reachability on a worldwide lat/lon grid (no range
+ * limit). Each cell is 1 if the path TX→cell is usable (LUF ≤ f ≤ MUF·grace).
+ * Returns the grid plus furthest reach and skip distance. The UI renders this as
+ * a reprojected raster, which — unlike polygons — handles poles/antipodes fine.
+ */
+export function coverageGrid({ txLat, txLon, freqMhz, ssn, kp, subsolar, powerW = 100,
+                              minTakeoffDeg = 3, modeMarginDb = 0, latStep = 3, lonStep = 3 }) {
+  const grace = mufGraceFor(modeMarginDb);
+  const nLat = Math.round(180 / latStep) + 1;
+  const nLon = Math.round(360 / lonStep);
+  const cells = new Uint8Array(nLat * nLon);
+  let maxReachKm = 0, minReachKm = Infinity, local = false;
+
+  for (let iLat = 0; iLat < nLat; iLat++) {
+    const lat = -90 + iLat * latStep;
+    for (let iLon = 0; iLon < nLon; iLon++) {
+      const lon = -180 + iLon * lonStep;
+      const d = greatCircleKm(txLat, txLon, lat, lon);
+      if (d < 80) continue; // skip the TX cell itself
+      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: lat, lon2: lon, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
+      if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz * grace) {
+        cells[iLat * nLon + iLon] = 1;
+        if (d > maxReachKm) maxReachKm = d;
+        if (d < minReachKm) minReachKm = d;
+        if (d < 700) local = true;
+      }
+    }
+  }
+  return { nLat, nLon, latStep, lonStep, cells, maxReachKm, skipKm: local ? 0 : (minReachKm === Infinity ? 0 : minReachKm) };
 }
 
 /**
