@@ -92,6 +92,12 @@ function arcGeometries(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw) {
   const n = sectors.length;
   const outer = circMean(medianSmooth(outerRaw), 3);
   const inner = circMean(medianSmooth(innerRaw), 2);
+
+  // Don't let the coverage ring grow large enough to enclose the nearer pole —
+  // a polygon that wraps a pole renders as horizontal-line artifacts. Clamp the
+  // outer radius to stay a few degrees short of the pole (≈111 km per degree).
+  const poleSafeKm = Math.max(2500, (90 - Math.abs(txLat) - 6) * 111.195);
+  for (let i = 0; i < outer.length; i++) outer[i] = Math.min(outer[i], poleSafeKm);
   const arcStep = Math.min(2, azStepDeg / 2);
   const dest = (az, d) => destinationPoint(txLat, txLon, az, Math.max(1, d));
   const open = outer.map((v) => v > 50);

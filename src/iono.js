@@ -26,7 +26,7 @@ export function foE(cosZenith, ssn) {
 export function foF2(cosZenith, ssn, { kp = 0, absLat = 0 } = {}) {
   const s = ssn / 180;
   const fNight = 2.0 + 2.5 * s;
-  const fDayMax = 6.0 + 7.0 * s;
+  const fDayMax = 6.5 + 8.0 * s;
   const fDay = fDayMax * Math.pow(Math.max(0, cosZenith), 0.5);
   let f = Math.sqrt(fNight * fNight + fDay * fDay);
 
