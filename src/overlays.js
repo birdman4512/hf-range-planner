@@ -82,12 +82,13 @@ function unwrapLon(points) {
 }
 
 /**
- * Render one smoothed coverage tier (inner/outer reach per azimuth) as seamless
- * filled polygons: each contiguous open arc becomes a single polygon (no
- * internal radial seams), with real gaps between arcs (no chords) and date-line
- * safe longitudes. Returns an array of L.polygon.
+ * Build smoothed coverage-tier geometries (inner/outer reach per azimuth) as
+ * seamless rings: each contiguous open arc is one geometry (no internal radial
+ * seams), with real gaps between arcs (no chords) and date-line-safe longitudes.
+ * Returns an array of geometries; each geometry is an array of rings suitable
+ * for L.polygon (one ring = simple polygon; two rings = polygon with a hole).
  */
-function arcPolygons(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw, style) {
+function arcGeometries(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw) {
   const n = sectors.length;
   const outer = circMean(medianSmooth(outerRaw), 3);
   const inner = circMean(medianSmooth(innerRaw), 2);
@@ -104,14 +105,14 @@ function arcPolygons(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw, style
       outerRing.push(dest(azc, outer[i]));
       innerRing.push(dest(azc, inner[i]));
     }
-    return [L.polygon([unwrapLon(outerRing), unwrapLon(innerRing.reverse())], style)];
+    return [[unwrapLon(outerRing), unwrapLon(innerRing.reverse())]];
   }
 
-  // Otherwise one polygon per contiguous open arc. Anchor at a closed sector.
+  // Otherwise one geometry per contiguous open arc. Anchor at a closed sector.
   let start = 0;
   while (open[start]) start++;
   const order = Array.from({ length: n }, (_, k) => (start + k) % n);
-  const polys = [];
+  const geoms = [];
   let run = [];
   const flush = () => {
     if (!run.length) return;
@@ -124,45 +125,54 @@ function arcPolygons(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw, style
       const idx = run[r], a0 = sectors[idx].azimuth, a1 = a0 + azStepDeg;
       for (let az = a1; az >= a0 - 1e-6; az -= arcStep) pts.push(dest(az, inner[idx]));
     }
-    polys.push(L.polygon(unwrapLon(pts), style));
+    geoms.push([unwrapLon(pts)]);
     run = [];
   };
   for (const idx of order) (open[idx] ? run.push(idx) : flush());
   flush();
-  return polys;
+  return geoms;
 }
+
+// Shift every ring of a geometry by dLon (for drawing across world copies).
+const shiftGeom = (geom, d) => geom.map((ring) => shiftLon(ring, d));
 
 /**
  * Render a coverage footprint with graded reliability: a faint full-reach area
- * plus a brighter "reliable core" near the FOT sweet-spot. Pass { color, opacity }
- * to tint (e.g. dual A/B coverage).
+ * plus a brighter "reliable core" near the FOT sweet-spot. Drawn on every world
+ * copy so the pattern wraps continuously around the globe as the user pans.
+ * Pass { color, opacity } to tint (e.g. dual A/B coverage).
  */
 export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } = {}) {
   const { txLat, txLon, azStepDeg, sectors } = footprint;
   if (!sectors.length) return L.layerGroup([]);
 
-  const reach = arcPolygons(
-    txLat, txLon, azStepDeg, sectors,
-    sectors.map((s) => s.reachInner), sectors.map((s) => s.reachOuter),
-    { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.5 },
-  );
-  const core = arcPolygons(
-    txLat, txLon, azStepDeg, sectors,
-    sectors.map((s) => s.goodInner), sectors.map((s) => s.goodOuter),
-    { color, weight: 0, fillColor: color, fillOpacity: opacity },
-  );
-  return L.layerGroup([...reach, ...core]);
+  const reach = arcGeometries(txLat, txLon, azStepDeg, sectors,
+    sectors.map((s) => s.reachInner), sectors.map((s) => s.reachOuter));
+  const core = arcGeometries(txLat, txLon, azStepDeg, sectors,
+    sectors.map((s) => s.goodInner), sectors.map((s) => s.goodOuter));
+
+  const reachStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity * 0.5, interactive: false };
+  const coreStyle = { color, weight: 0, fillColor: color, fillOpacity: opacity, interactive: false };
+
+  const items = [];
+  for (const d of WORLD_COPIES) {
+    for (const g of reach) items.push(L.polygon(shiftGeom(g, d), reachStyle));
+    for (const g of core) items.push(L.polygon(shiftGeom(g, d), coreStyle));
+  }
+  return L.layerGroup(items);
 }
 
-/** Render a great-circle path with hop reflection points. Returns a LayerGroup. */
+/** Render a great-circle path with hop reflection points, on every world copy. */
 export function makePath(a, b, analysis) {
   const items = [];
   const line = unwrapLon([[a.lat, a.lon], [b.lat, b.lon]]);
-  items.push(L.polyline(line, { color: '#2f81f7', weight: 3, opacity: 0.9 }));
-  for (const [lat, lon] of analysis.groundPoints) {
-    items.push(L.circleMarker([lat, lon], {
-      radius: 4, color: '#f7a32f', fillColor: '#f7a32f', fillOpacity: 0.9, weight: 1,
-    }).bindTooltip('Ground reflection'));
+  for (const d of WORLD_COPIES) {
+    items.push(L.polyline(shiftLon(line, d), { color: '#2f81f7', weight: 3, opacity: 0.9 }));
+    for (const [lat, lon] of analysis.groundPoints) {
+      items.push(L.circleMarker([lat, lon + d], {
+        radius: 4, color: '#f7a32f', fillColor: '#f7a32f', fillOpacity: 0.9, weight: 1,
+      }).bindTooltip('Ground reflection'));
+    }
   }
   return L.layerGroup(items);
 }
