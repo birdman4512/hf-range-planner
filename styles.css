@@ -312,5 +312,8 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 
 @media (max-width: 720px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  #sidebar { max-height: 52vh; }
+  #sidebar { width: 100%; max-height: 55vh; }
+  /* Collapse vertically (slide the panel up) on narrow screens. */
+  #app.collapsed { grid-template-columns: 1fr; grid-template-rows: 0 1fr; }
+  #app.collapsed #sidebar { transform: translateY(-100%); }
 }
