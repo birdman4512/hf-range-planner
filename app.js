@@ -34,7 +34,9 @@ const pinIcon = (which) => L.divIcon({
 function initMap() {
   // No worldCopyJump: overlays are drawn on world copies ourselves, and the
   // jump-recentre it does caused a visible flicker when panning across ±180°.
-  state.map = L.map('map', { minZoom: 2 }).setView([30, 0], 3);
+  // Zoom control on the right so it doesn't sit under the collapse/expand button.
+  state.map = L.map('map', { minZoom: 2, zoomControl: false }).setView([30, 0], 3);
+  L.control.zoom({ position: 'topright' }).addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 12, attribution: '© OpenStreetMap contributors',
   }).addTo(state.map);
@@ -142,7 +144,12 @@ function clearResultLayer() {
 
 function getCoverageEnv() {
   const { ssn, kp } = getConditions();
-  return { ssn, kp, subsolar: getSubsolar(), powerW: Number($('in-power').value) || 100 };
+  return {
+    ssn, kp,
+    subsolar: getSubsolar(),
+    powerW: Number($('in-power').value) || 100,
+    minTakeoffDeg: Number($('in-takeoff').value) || 5,
+  };
 }
 
 function clearBandLayers() {
@@ -217,8 +224,10 @@ function runPath() {
   const { ssn, kp } = getConditions();
   const subsolar = getSubsolar();
   const powerW = Number($('in-power').value) || 100;
+  const minTakeoffDeg = Number($('in-takeoff').value) || 5;
   const analysis = analyzePath({
-    lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon, ssn, kp, subsolar, powerW,
+    lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon,
+    ssn, kp, subsolar, powerW, minTakeoffDeg,
   });
 
   const useClutter = $('lyr-clutter').checked;
@@ -273,7 +282,7 @@ function runPath() {
     tr.addEventListener('click', () => {
       for (const r of $('path-results').querySelectorAll('.band-row')) r.classList.remove('selected');
       tr.classList.add('selected');
-      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW });
+      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW, minTakeoffDeg });
     });
   }
 }
@@ -285,12 +294,12 @@ function clearBandCoverage() {
   }
 }
 
-function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW }) {
+function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW, minTakeoffDeg }) {
   clearBandCoverage();
   const grp = L.layerGroup();
   for (const [pt, color] of [[state.a, '#3fb950'], [state.b, '#f7a32f']]) {
     if (!pt) continue;
-    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW });
+    const fp = coverageFootprint({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW, minTakeoffDeg });
     makeFootprint(fp, { color, opacity: 0.26 }).addTo(grp);
   }
   grp.addTo(state.map);
@@ -387,9 +396,12 @@ function wire() {
 
   $('btn-run-path').addEventListener('click', runPath);
 
-  // Inputs that change conditions re-render the active coverage bands live.
+  // Inputs that change conditions re-render the active coverage bands live;
+  // the Recompute button is an explicit trigger for the same.
   const refresh = () => renderActiveBands();
+  $('btn-recompute').addEventListener('click', refresh);
   $('in-power').addEventListener('change', refresh);
+  $('in-takeoff').addEventListener('change', refresh);
   $('in-ssn').addEventListener('change', refresh);
   $('in-kp').addEventListener('change', refresh);
 

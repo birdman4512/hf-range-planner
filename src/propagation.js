@@ -15,11 +15,17 @@ const FH = 1.0;            // electron gyro-frequency (MHz), absorption denomina
 const ABS_THRESHOLD = 25;  // dB of absorption tolerated before a path is "below LUF"
 const MAX_TOTAL_KM = 13000;
 
-/** Maximum single-hop ground range (km) for a reflection at virtual height h. */
-export function maxHopGroundKm(hKm) {
-  // At zero takeoff the ray is tangent to the earth: cos(ψ) = R/(R+h).
-  const psi = Math.acos(R / (R + hKm));
-  return 2 * R * psi;
+/**
+ * Maximum single-hop ground range (km) for a reflection at virtual height h,
+ * given the antenna's lowest usable takeoff angle (degrees). A lower takeoff
+ * reaches farther per hop; the default 0° is the geometric (tangent-ray) limit.
+ */
+export function maxHopGroundKm(hKm, minTakeoffDeg = 0) {
+  const k = R / (R + hKm);
+  const beta = toRad(minTakeoffDeg);
+  // cos(ψ + β) = k·cos(β)  ⇒  ψ = acos(k·cosβ) − β.
+  const psi = Math.acos(Math.min(1, k * Math.cos(beta))) - beta;
+  return 2 * R * Math.max(0, psi);
 }
 
 /**
@@ -77,7 +83,8 @@ export function analyzePath(env) {
   const [mlat, mlon] = intermediatePoint(lat1, lon1, lat2, lon2, 0.5);
   const midCos = cosZenith(mlat, mlon, env.subsolar);
   const hMid = hmF2(midCos, env.ssn);
-  const maxHopF2 = maxHopGroundKm(hMid);
+  const minTakeoff = env.minTakeoffDeg ?? 3;
+  const maxHopF2 = maxHopGroundKm(hMid, minTakeoff);
   const hopCount = Math.max(1, Math.ceil(D / maxHopF2));
   const dHop = D / hopCount;
 
@@ -188,7 +195,7 @@ export function pathReliability(analysis, freqMhz) {
  * than a flat blob. NVIS near-in coverage appears as a span starting near 0.
  */
 export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, powerW = 100,
-                                    azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
+                                    minTakeoffDeg = 3, azStepDeg = 4, dStepKm = 120, goodThreshold = 0.5 }) {
   const sectors = [];
   let maxReachKm = 0;
   let skipKm = null;
@@ -197,7 +204,7 @@ export function coverageFootprint({ txLat, txLon, freqMhz, ssn, kp, subsolar, po
     let reachInner = 0, reachOuter = 0, goodInner = 0, goodOuter = 0;
     for (let d = dStepKm; d <= MAX_TOTAL_KM; d += dStepKm) {
       const [rxLat, rxLon] = destinationPoint(txLat, txLon, az, d);
-      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW });
+      const a = analyzePath({ lat1: txLat, lon1: txLon, lat2: rxLat, lon2: rxLon, ssn, kp, subsolar, powerW, minTakeoffDeg });
       if (freqMhz >= a.lufMhz && freqMhz <= a.mufMhz) {
         if (!reachInner) reachInner = d;
         reachOuter = d;
