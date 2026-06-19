@@ -172,14 +172,16 @@ function applyIndicesForTime() {
   }
 }
 
+let sliderTimer = null;
 function onSlider() {
   const h = Number($('time-slider').value);
   state.timeUTC = new Date(state.anchorTime + h * 3600000);
   $('slider-label').textContent = h === 0 ? 'now' : `+${h} h`;
-  applyIndicesForTime();
   renderTimeInput();
   redrawTerminator();
-  refreshActive();
+  // Debounce the heavy recompute (coverage/path) until the drag settles.
+  clearTimeout(sliderTimer);
+  sliderTimer = setTimeout(() => { applyIndicesForTime(); refreshActive(); }, 200);
 }
 
 // Snap to local solar noon at the active site, so high-band daytime coverage is

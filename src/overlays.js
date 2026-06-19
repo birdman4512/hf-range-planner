@@ -51,18 +51,26 @@ export function makeKc2gOverlay(onError) {
   img.crossOrigin = 'anonymous';
   img.onload = () => {
     try {
+      // Rasterize the (complex) SVG plot area ONCE to a source canvas — drawing
+      // an SVG is expensive, so we must not do it per output row.
       const s = img.naturalWidth / KC2G_VB_W;
-      const sx = KC2G_MAP.x * s, sy = KC2G_MAP.y * s, sw = KC2G_MAP.w * s, sh = KC2G_MAP.h * s;
-      const W = 1024, H = 1024;
+      const srcW = Math.round(KC2G_MAP.w * s), srcH = Math.round(KC2G_MAP.h * s);
+      const src = document.createElement('canvas');
+      src.width = srcW; src.height = srcH;
+      src.getContext('2d').drawImage(
+        img, KC2G_MAP.x * s, KC2G_MAP.y * s, KC2G_MAP.w * s, KC2G_MAP.h * s, 0, 0, srcW, srcH);
+
+      // Reproject equirectangular → Mercator with cheap canvas→canvas row copies.
+      const W = 900, H = 900;
       const cv = document.createElement('canvas');
       cv.width = W; cv.height = H;
       const ctx = cv.getContext('2d');
       const yTop = Math.log(Math.tan(Math.PI / 4 + (MERC_MAX * Math.PI / 180) / 2));
       for (let j = 0; j < H; j++) {
-        const my = yTop - (2 * yTop) * (j / (H - 1));            // Mercator y for this row
+        const my = yTop - (2 * yTop) * (j / (H - 1));
         const lat = (2 * Math.atan(Math.exp(my)) - Math.PI / 2) * 180 / Math.PI;
-        const srcRow = sy + ((90 - lat) / 180) * sh;            // equirectangular source row
-        ctx.drawImage(img, sx, srcRow, sw, 1, 0, j, W, 1);
+        const srcRow = ((90 - lat) / 180) * srcH;
+        ctx.drawImage(src, 0, srcRow, srcW, 1, 0, j, W, 1);
       }
       L.imageOverlay(cv.toDataURL('image/png'), [[-MERC_MAX, -180], [MERC_MAX, 180]], {
         opacity: 0.5, interactive: false,
