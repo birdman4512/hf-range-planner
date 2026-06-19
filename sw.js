@@ -5,7 +5,7 @@
 //
 // NOTE: bump CACHE whenever the precached shell list changes.
 
-const CACHE = 'hf-range-planner-v11';
+const CACHE = 'hf-range-planner-v12';
 const SHELL = [
   './',
   './index.html',

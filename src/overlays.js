@@ -72,9 +72,13 @@ export function makeKc2gOverlay(onError) {
         const srcRow = ((90 - lat) / 180) * srcH;
         ctx.drawImage(src, 0, srcRow, srcW, 1, 0, j, W, 1);
       }
-      L.imageOverlay(cv.toDataURL('image/png'), [[-MERC_MAX, -180], [MERC_MAX, 180]], {
-        opacity: 0.5, interactive: false,
-      }).addTo(group);
+      // Draw on each world copy so it repeats as the map scrolls.
+      const url = cv.toDataURL('image/png');
+      for (const d of WORLD_COPIES) {
+        L.imageOverlay(url, [[-MERC_MAX, -180 + d], [MERC_MAX, 180 + d]], {
+          opacity: 0.5, interactive: false,
+        }).addTo(group);
+      }
     } catch (e) {
       onError && onError();
     }
