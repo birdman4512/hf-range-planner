@@ -569,6 +569,11 @@ function wire() {
 
   $('btn-collapse').addEventListener('click', () => setCollapsed(true));
   $('btn-expand').addEventListener('click', () => setCollapsed(false));
+
+  // Collapsible sidebar sections.
+  for (const head of document.querySelectorAll('.panel.collapsible .panel-head')) {
+    head.addEventListener('click', () => head.parentElement.classList.toggle('collapsed'));
+  }
 }
 
 function setCollapsed(collapsed) {

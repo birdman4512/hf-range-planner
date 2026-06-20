@@ -40,8 +40,9 @@
       </header>
 
       <!-- Solar weather -->
-      <section class="panel" id="panel-solar">
-        <h2>Solar &amp; ionospheric conditions</h2>
+      <section class="panel collapsible" id="panel-solar">
+        <h2 class="panel-head">Solar &amp; ionospheric conditions<span class="chev">▾</span></h2>
+        <div class="panel-body">
         <div class="grid3">
           <label>SFI (F10.7)
             <input type="number" id="in-sfi" min="60" max="320" step="1" />
@@ -71,11 +72,13 @@
           <span id="solar-status">Loading live data…</span>
           <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>
         </div>
+        </div>
       </section>
 
       <!-- Station (applies to both modes) -->
-      <section class="panel" id="panel-station">
-        <h2>Your station</h2>
+      <section class="panel collapsible" id="panel-station">
+        <h2 class="panel-head">Your station<span class="chev">▾</span></h2>
+        <div class="panel-body">
         <div class="grid2">
           <label>TX power (W)
             <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
@@ -87,6 +90,7 @@
         <label title="Weak-signal modes (FT8) decode far below the noise, so they reach much further than SSB">Mode
           <select id="in-mode"></select>
         </label>
+        </div>
       </section>
 
       <!-- Mode switch -->
@@ -136,12 +140,14 @@
       </section>
 
       <!-- Layers -->
-      <section class="panel" id="panel-layers">
-        <h2>Layers</h2>
+      <section class="panel collapsible" id="panel-layers">
+        <h2 class="panel-head">Layers<span class="chev">▾</span></h2>
+        <div class="panel-body">
         <div class="layer-btns">
           <label class="layer-btn lyr-day" title="Day/night terminator"><input type="checkbox" id="lyr-terminator" checked /><span>Day/night</span></label>
           <label class="layer-btn lyr-muf" title="KC2G MUF reference overlay"><input type="checkbox" id="lyr-kc2g" /><span>KC2G</span></label>
           <label class="layer-btn lyr-clut" title="Ground-reflection clutter"><input type="checkbox" id="lyr-clutter" checked /><span>Clutter</span></label>
+        </div>
         </div>
       </section>
 

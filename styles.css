@@ -82,6 +82,21 @@ html, body {
   color: var(--muted);
 }
 
+/* Collapsible panel sections */
+.panel .panel-head {
+  margin: 0;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  user-select: none;
+}
+.panel .panel-head:hover { color: var(--text); }
+.panel-head .chev { font-size: 9px; color: var(--muted); transition: transform .15s ease; }
+.panel.collapsed .panel-head .chev { transform: rotate(-90deg); }
+.panel-body { margin-top: 10px; }
+.panel.collapsed .panel-body { display: none; }
+
 /* Grid layouts keep inputs in tidy aligned columns. */
 .grid2, .grid3 { display: grid; gap: 8px 10px; }
 .grid2 { grid-template-columns: 1fr 1fr; }
