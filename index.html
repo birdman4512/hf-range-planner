@@ -39,6 +39,58 @@
         <button type="button" id="btn-collapse" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">‹</button>
       </header>
 
+      <!-- Primary intent: view coverage, or understand a path -->
+      <section class="panel panel-mode" id="panel-mode">
+        <div class="tabs" role="tablist">
+          <button type="button" class="tab active" id="tab-coverage" role="tab">
+            <span class="tab-title">Coverage</span>
+            <span class="tab-sub">Where does a band reach?</span>
+          </button>
+          <button type="button" class="tab" id="tab-path" role="tab">
+            <span class="tab-title">Path / Band</span>
+            <span class="tab-sub">Best band for A→B?</span>
+          </button>
+        </div>
+
+        <!-- Mode A: frequency -> footprint -->
+        <div class="mode-body" id="mode-coverage">
+          <p class="hint">Set a TX site, then toggle bands to map where each lands.</p>
+          <div class="site" id="site-tx">
+            <span class="site-tag pin pin-tx">TX</span>
+            <span id="tx-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-tx" class="ghost">On map</button>
+              <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
+            </div>
+          </div>
+          <div class="band-toggles" id="band-toggles"></div>
+          <button type="button" id="btn-recompute" class="primary">Recompute coverage</button>
+          <div class="results" id="coverage-results"></div>
+        </div>
+
+        <!-- Mode B: two points -> band -->
+        <div class="mode-body hidden" id="mode-path">
+          <p class="hint">Drop two markers; get the best band for that path right now.</p>
+          <div class="site" id="site-a">
+            <span class="site-tag pin pin-a">A</span>
+            <span id="a-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-a" class="ghost">On map</button>
+              <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
+            </div>
+          </div>
+          <div class="site" id="site-b">
+            <span class="site-tag pin pin-b">B</span>
+            <span id="b-coords" class="coords">not set</span>
+            <div class="site-actions">
+              <button type="button" id="btn-pick-b" class="ghost">On map</button>
+            </div>
+          </div>
+          <button type="button" id="btn-run-path" class="primary">Recommend band</button>
+          <div class="results" id="path-results"></div>
+        </div>
+      </section>
+
       <!-- Solar weather -->
       <section class="panel collapsible" id="panel-solar">
         <h2 class="panel-head">Solar &amp; ionospheric conditions<span class="chev">▾</span></h2>
@@ -90,52 +142,6 @@
         <label title="Weak-signal modes (FT8) decode far below the noise, so they reach much further than SSB">Mode
           <select id="in-mode"></select>
         </label>
-        </div>
-      </section>
-
-      <!-- Mode switch -->
-      <section class="panel" id="panel-mode">
-        <div class="tabs" role="tablist">
-          <button type="button" class="tab active" id="tab-coverage" role="tab">Coverage</button>
-          <button type="button" class="tab" id="tab-path" role="tab">Path / Band</button>
-        </div>
-
-        <!-- Mode A: frequency -> footprint -->
-        <div class="mode-body" id="mode-coverage">
-          <p class="hint">Set a TX site, then toggle bands to map where each lands.</p>
-          <div class="site" id="site-tx">
-            <span class="site-tag pin pin-tx">TX</span>
-            <span id="tx-coords" class="coords">not set</span>
-            <div class="site-actions">
-              <button type="button" id="btn-pick-tx" class="ghost">On map</button>
-              <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
-            </div>
-          </div>
-          <div class="band-toggles" id="band-toggles"></div>
-          <button type="button" id="btn-recompute" class="primary">Recompute coverage</button>
-          <div class="results" id="coverage-results"></div>
-        </div>
-
-        <!-- Mode B: two points -> band -->
-        <div class="mode-body hidden" id="mode-path">
-          <p class="hint">Drop two markers; get the best band for that path right now.</p>
-          <div class="site" id="site-a">
-            <span class="site-tag pin pin-a">A</span>
-            <span id="a-coords" class="coords">not set</span>
-            <div class="site-actions">
-              <button type="button" id="btn-pick-a" class="ghost">On map</button>
-              <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
-            </div>
-          </div>
-          <div class="site" id="site-b">
-            <span class="site-tag pin pin-b">B</span>
-            <span id="b-coords" class="coords">not set</span>
-            <div class="site-actions">
-              <button type="button" id="btn-pick-b" class="ghost">On map</button>
-            </div>
-          </div>
-          <button type="button" id="btn-run-path" class="primary">Recommend band</button>
-          <div class="results" id="path-results"></div>
         </div>
       </section>
 
