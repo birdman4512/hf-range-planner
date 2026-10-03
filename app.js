@@ -60,6 +60,17 @@ function initMap() {
   // Zoom control on the right so it doesn't sit under the collapse/expand button.
   state.map = L.map('map', { minZoom: 2, zoomControl: false }).setView([30, 0], 3);
   L.control.zoom({ position: 'topright' }).addTo(state.map);
+  // Layer toggles live on the map (top-right, under zoom): move the markup in.
+  const layers = L.control({ position: 'topright' });
+  layers.onAdd = () => {
+    const el = $('layer-btns');
+    el.hidden = false;
+    el.classList.add('leaflet-control');
+    L.DomEvent.disableClickPropagation(el);
+    L.DomEvent.disableScrollPropagation(el);
+    return el;
+  };
+  layers.addTo(state.map);
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 12, attribution: '© OpenStreetMap contributors',
   }).addTo(state.map);
@@ -342,6 +353,17 @@ function renderWx() {
   const kp = getConditions().kp;
   if (kp >= 5) items.push(`<span class="warn">Kp ${kp}: geomagnetic storm — F2 depressed, auroral absorption</span>`);
   $('wx-list').innerHTML = items.map((s) => `<li>${s}</li>`).join('');
+
+  // One-line summary for the collapsed "Conditions" header.
+  const parts = [`R12 ${f.r12Used.toFixed(0)}${f.assimilated ? ` (${f.stationsUsed} ionosondes)` : ''}`, `Kp ${kp}`];
+  let warn = kp >= 5;
+  if (live && live.xray) {
+    parts.push(flareClass(live.xray.flux));
+    warn = warn || live.xray.flux >= 1e-5;
+  }
+  if (live && live.protons && live.protons.flux >= 10) { parts.push('PCA'); warn = true; }
+  $('cond-summary').textContent = `${parts.join(' · ')}${warn ? ' ⚠' : ''}`;
+  $('cond-summary').classList.toggle('warn', warn);
 }
 
 // --- Background computation (Web Worker, with main-thread fallback) ---------
@@ -526,10 +548,7 @@ async function renderActiveBands() {
     (openRows.length ? `<table><tr><th>Band</th><th>Reach (≥50 %)</th><th></th></tr>${openRows.join('')}</table>` : '') +
     (closedRows.length ? `<table>${closedRows.join('')}</table>` : '') +
     (best && !openRows.length ? '<p class="hint">No band reaches 50 % anywhere right now.</p>' : '') +
-    `<p class="hint">${best
-      ? `Each region is coloured by its most reliable band for ${modeName}; shading deepens with reliability.`
-      : `Shading deepens with reliability (chance the path supports ${modeName} with your station). The gap by the TX is the skip zone.`}
-      Click the map for details at any point.</p>`;
+    `<p class="hint">Reliability for ${modeName} with your station. Click the map for details at any point.</p>`;
   colourBandDots();
   updateLegend();
 }
@@ -679,9 +698,8 @@ function runPath(fit = true) {
       ${rows}
     </table>
     ${budget}
-    <p class="hint">Rel. = probability ${mode.label} works on that band right now (day-to-day MUF and
-      signal variation included). SNR is the median in ${mode.bwHz} Hz. Click a band to map its coverage
-      from both ends (<span class="dot dot-a"></span>A, <span class="dot dot-b"></span>B).</p>`;
+    <p class="hint">Rel. = chance ${mode.label} works now · SNR in ${mode.bwHz} Hz · click a band to map it from
+      <span class="dot dot-a"></span>A and <span class="dot dot-b"></span>B.</p>`;
 
   // Clicking a band row overlays the coverage footprint from A and from B.
   for (const tr of $('path-results').querySelectorAll('.band-row')) {
@@ -930,8 +948,7 @@ function persist() {
   persistTimer = setTimeout(() => {
     const s = snapshot();
     try {
-      const collapsed = [...document.querySelectorAll('.panel.collapsible.collapsed')].map((p) => p.id);
-      localStorage.setItem(STORE_KEY, JSON.stringify({ ...s, collapsed }));
+      localStorage.setItem(STORE_KEY, JSON.stringify(s));
     } catch { /* storage unavailable (private mode etc.) — not essential */ }
     history.replaceState(null, '', `#${snapshotToParams(s)}`);
   }, 300);
@@ -970,7 +987,8 @@ function restore() {
     if (s.t && !Number.isNaN(Date.parse(s.t))) {
       state.timeUTC = new Date(Date.parse(s.t));
     }
-    for (const id of saved.collapsed || []) { const p = $(id); if (p) p.classList.add('collapsed'); }
+    // Returning visitors already have their station set up: show just its summary.
+    if (loadSaved()) $('panel-station').classList.add('collapsed');
   } finally {
     state.restoring = false;
   }
@@ -1031,7 +1049,6 @@ function wire() {
 
   // Inputs that change conditions update whichever mode is active.
   const refresh = refreshActive;
-  $('btn-recompute').addEventListener('click', refresh);
   for (const id of ['in-power', 'in-takeoff', 'in-mode', 'in-ssn', 'in-kp', 'in-sfi',
     'in-ant', 'in-ant-h', 'in-rx-ant', 'in-rx-ant-h', 'in-noise', 'lyr-clutter']) {
     $(id).addEventListener('change', refresh);
@@ -1062,12 +1079,16 @@ function wire() {
   $('lyr-iono').addEventListener('change', redrawIonosondes);
 
   $('btn-share').addEventListener('click', shareLink);
+  $('btn-about').addEventListener('click', () => $('about').showModal());
+  $('btn-about-close').addEventListener('click', () => $('about').close());
+  // Click on the backdrop closes the dialog too.
+  $('about').addEventListener('click', (e) => { if (e.target === $('about')) $('about').close(); });
   $('btn-collapse').addEventListener('click', () => setCollapsed(true));
   $('btn-expand').addEventListener('click', () => setCollapsed(false));
 
   // Collapsible sidebar sections (state remembered).
   for (const head of document.querySelectorAll('.panel.collapsible .panel-head')) {
-    head.addEventListener('click', () => { head.parentElement.classList.toggle('collapsed'); persist(); });
+    head.addEventListener('click', () => head.parentElement.classList.toggle('collapsed'));
   }
 }
 
@@ -1099,7 +1120,10 @@ async function main() {
   restore();
   if (!state.tx) {
     // First visit: nothing set yet — show the empty-state prompt once.
-    $('coverage-results').innerHTML = '<p class="hint">Set a TX site — click “On map”, use 📍 Me, or type your locator.</p>';
+    $('coverage-results').innerHTML = '<p class="hint">Set a TX site — click “On map”, use 📍 Me, or type your locator — then pick bands.</p>';
+  }
+  if (!state.a || !state.b) {
+    $('path-results').innerHTML = '<p class="hint">Set A and B, then press Recommend band.</p>';
   }
   renderTimeInput();
   updateStationSummary();
