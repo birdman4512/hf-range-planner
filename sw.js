@@ -5,7 +5,7 @@
 //
 // NOTE: bump CACHE whenever the precached shell list changes.
 
-const CACHE = 'hf-range-planner-v17';
+const CACHE = 'hf-range-planner-v18';
 const SHELL = [
   './',
   './index.html',
@@ -26,6 +26,7 @@ const SHELL = [
   './src/assimilate.js',
   './src/antenna.js',
   './src/noise.js',
+  './src/worker.js',
   './src/data/ccir.js',
   './src/data/igrf.js',
   './src/data/landmask.js',

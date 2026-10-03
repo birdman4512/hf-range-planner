@@ -148,3 +148,31 @@ export function nightPolygon(subsolar, stepDeg = 2) {
   pts.push([darkPole, 180], [darkPole, -180]);
   return pts;
 }
+
+// --- Maidenhead locators ---------------------------------------------------
+
+/**
+ * Maidenhead locator (2, 4, 6 or 8 characters, e.g. "QF56", "JO01ab", "FN31pr45")
+ * → centre of that square as { lat, lon }, or null if it isn't a valid locator.
+ */
+export function maidenheadToLatLon(loc) {
+  const s = String(loc || '').trim().toUpperCase();
+  if (!/^[A-R]{2}(\d{2}([A-X]{2}(\d{2})?)?)?$/.test(s)) return null;
+  let lon = (s.charCodeAt(0) - 65) * 20 - 180;
+  let lat = (s.charCodeAt(1) - 65) * 10 - 90;
+  let w = 20, h = 10;
+  if (s.length >= 4) { w = 2; h = 1; lon += Number(s[2]) * w; lat += Number(s[3]) * h; }
+  if (s.length >= 6) { w = 2 / 24; h = 1 / 24; lon += (s.charCodeAt(4) - 65) * w; lat += (s.charCodeAt(5) - 65) * h; }
+  if (s.length >= 8) { w /= 10; h /= 10; lon += Number(s[6]) * w; lat += Number(s[7]) * h; }
+  return { lat: lat + h / 2, lon: lon + w / 2 };
+}
+
+/** lat/lon → 6-character Maidenhead locator (e.g. "JO01ab"). */
+export function latLonToMaidenhead(lat, lon) {
+  const x = Math.min(359.9999, Math.max(0, lon + 180));
+  const y = Math.min(179.9999, Math.max(0, lat + 90));
+  const A = (n) => String.fromCharCode(65 + n), a = (n) => String.fromCharCode(97 + n);
+  return A(Math.floor(x / 20)) + A(Math.floor(y / 10)) +
+    Math.floor((x % 20) / 2) + Math.floor(y % 10) +
+    a(Math.floor((x % 2) * 12)) + a(Math.floor((y % 1) * 24));
+}

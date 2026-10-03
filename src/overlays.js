@@ -2,6 +2,7 @@
 // path). Uses the global `L` provided by the Leaflet script tag.
 
 import { terminatorPolyline, nightPolygon, intermediatePoint } from './geo.js';
+import { bestBandAt } from './propagation.js';
 
 const L = window.L;
 const KC2G_URL = 'https://prop.kc2g.com/renders/current/mufd-normal-now.svg';
@@ -108,18 +109,17 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-/**
- * Render a GLOBAL coverage grid (from propagation.coverageGrids) as a reprojected
- * raster overlay — no range limit, and poles/antipodes render correctly (unlike
- * polygons). Cell values are reliability 0–255: shading deepens with
- * reliability and cells below ~5 % are left clear. The blocky grid is
- * bilinearly smoothed and drawn on every world copy. Pass { color, opacity }.
- */
-export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } = {}) {
-  const { nLat, nLon, cells } = grid;
-  const [r, g, b] = hexToRgb(color);
-  const maxA = Math.min(1, opacity) * 255;
+/** Minimal HTML escaping for text from external feeds (station names etc.). */
+export const escapeHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+/** Alpha for a reliability value: cells below ~5 % clear, deepening to full at ~90 %. */
+const relAlpha = (rel, maxA) => (rel < 0.05 ? 0 : Math.round(maxA * (0.25 + 0.75 * Math.min(1, rel / 0.9))));
+
+/**
+ * Global equirectangular grid → reprojected Mercator raster on every world copy.
+ * `pixel(k)` returns [r, g, b, a] for cell k (row-major from −90° lat) or null.
+ */
+function gridRaster(nLat, nLon, pixel) {
   // Equirectangular source canvas (lat +90 at the top row).
   const eq = document.createElement('canvas');
   eq.width = nLon; eq.height = nLat;
@@ -128,12 +128,10 @@ export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } =
   for (let iLat = 0; iLat < nLat; iLat++) {
     const y = nLat - 1 - iLat;
     for (let iLon = 0; iLon < nLon; iLon++) {
-      const rel = cells[iLat * nLon + iLon] / 255;
-      if (rel >= 0.05) {
-        const p = (y * nLon + iLon) * 4;
-        id.data[p] = r; id.data[p + 1] = g; id.data[p + 2] = b;
-        id.data[p + 3] = Math.round(maxA * (0.25 + 0.75 * Math.min(1, rel / 0.9)));
-      }
+      const px = pixel(iLat * nLon + iLon);
+      if (!px) continue;
+      const p = (y * nLon + iLon) * 4;
+      id.data[p] = px[0]; id.data[p + 1] = px[1]; id.data[p + 2] = px[2]; id.data[p + 3] = px[3];
     }
   }
   ectx.putImageData(id, 0, 0);
@@ -160,6 +158,52 @@ export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } =
   return group;
 }
 
+/**
+ * One band's coverage (from propagation.coverageGrids), shaded by reliability
+ * (cell values 0–255). No range limit; poles/antipodes render correctly.
+ */
+export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } = {}) {
+  const [r, g, b] = hexToRgb(color);
+  const maxA = Math.min(1, opacity) * 255;
+  return gridRaster(grid.nLat, grid.nLon, (k) => {
+    const a = relAlpha(grid.cells[k] / 255, maxA);
+    return a ? [r, g, b, a] : null;
+  });
+}
+
+/**
+ * "Best band" view: each cell coloured by its best band (see bestBandAt),
+ * shaded by that band's reliability. `colors[i]` matches grids[i].
+ */
+export function makeBestBandRaster(grids, colors, { opacity = 0.6 } = {}) {
+  const rgb = colors.map(hexToRgb);
+  const maxA = Math.min(1, opacity) * 255;
+  const { nLat, nLon } = grids[0];
+  return gridRaster(nLat, nLon, (k) => {
+    const { index, value } = bestBandAt(grids, k);
+    const a = index < 0 ? 0 : relAlpha(value / 255, maxA);
+    return a ? [...rgb[index], a] : null;
+  });
+}
+
+/** Map legend control (bottom-left); set its content with `.set(html)`. */
+export function makeLegend() {
+  const ctl = L.control({ position: 'bottomleft' });
+  let el;
+  ctl.onAdd = () => {
+    el = L.DomUtil.create('div', 'map-legend');
+    L.DomEvent.disableClickPropagation(el);
+    el.hidden = true;
+    return el;
+  };
+  ctl.set = (html) => {
+    if (!el) return;
+    el.innerHTML = html || '';
+    el.hidden = !html;
+  };
+  return ctl;
+}
+
 /** Render a great-circle path with hop reflection points, on every world copy. */
 export function makePath(a, b, analysis) {
   const items = [];
@@ -183,16 +227,23 @@ export function makePath(a, b, analysis) {
 
 /**
  * Ionosonde stations used for assimilation, coloured by foF2, with a tooltip of
- * the latest observation. Drawn on every world copy.
+ * the latest observation compared with the monthly-median model there
+ * (`modelAt(lat, lon)` → foF2). Drawn on every world copy.
  */
-export function makeIonosondeMarkers(stations) {
+export function makeIonosondeMarkers(stations, modelAt = null) {
   const items = [];
   const colour = (f) => (f >= 10 ? '#ff6b6b' : f >= 7 ? '#ffb454' : f >= 5 ? '#e6db74' : f >= 3 ? '#7ee787' : '#79c0ff');
   for (const s of stations) {
     const age = Math.round((Date.now() - s.timeMs) / 60000);
     const mufd = Number.isFinite(s.M3000) ? (s.foF2 * s.M3000).toFixed(1) : '—';
-    const tip = `${s.name} (${s.code})<br>foF2 ${s.foF2.toFixed(2)} MHz · MUF(3000) ${mufd} MHz` +
-      (Number.isFinite(s.foEs) ? ` · foEs ${s.foEs.toFixed(1)}` : '') + `<br>${age} min ago`;
+    let vs = '';
+    if (modelAt) {
+      const m = modelAt(s.lat, s.lon);
+      const pct = Math.round((s.foF2 / m - 1) * 100);
+      vs = `<br>Median model ${m.toFixed(2)} MHz → measured is <b>${pct >= 0 ? '+' : ''}${pct} %</b>`;
+    }
+    const tip = `<b>${escapeHtml(s.name)}</b> (${escapeHtml(s.code)})<br>foF2 ${s.foF2.toFixed(2)} MHz · MUF(3000) ${mufd} MHz` +
+      (Number.isFinite(s.foEs) ? ` · foEs ${s.foEs.toFixed(1)}` : '') + vs + `<br>${age} min ago`;
     for (const d of WORLD_COPIES) {
       items.push(L.circleMarker([s.lat, s.lon + d], {
         radius: 5, color: '#0e1116', weight: 1, fillColor: colour(s.foF2), fillOpacity: 0.95,

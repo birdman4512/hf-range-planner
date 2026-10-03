@@ -460,3 +460,19 @@ export function coverageGrids({ txLat, txLon, freqsMhz, field, sys, minTakeoffDe
   }
   return grids;
 }
+
+/**
+ * Index of the "best" band in one cell: the highest reliability, but among
+ * bands within ~5 % of that, the highest frequency (less noise and absorption,
+ * so the stronger signal). Grids must be ordered low → high frequency.
+ * Returns { index, value } with value 0–255, or index −1 if nothing reaches.
+ */
+export function bestBandAt(grids, k) {
+  let max = 0;
+  for (const g of grids) if (g.cells[k] > max) max = g.cells[k];
+  if (!max) return { index: -1, value: 0 };
+  for (let i = grids.length - 1; i >= 0; i--) {
+    if (grids[i].cells[k] >= max - 13) return { index: i, value: grids[i].cells[k] };
+  }
+  return { index: -1, value: 0 };
+}

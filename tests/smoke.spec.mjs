@@ -20,6 +20,17 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
   await expect(page.locator('#map .leaflet-tile-pane')).toHaveCount(1);
 
+  // Typing a Maidenhead locator places the TX and shows its coordinates + locator.
+  await page.fill('#loc-tx', 'JO01ab');
+  await page.press('#loc-tx', 'Enter');
+  await expect(page.locator('#tx-coords')).toContainText('JO01ab');
+  // Best-band view renders without errors and the station summary is filled in.
+  await page.click('#view-best');
+  await expect(page.locator('#view-best')).toHaveClass(/active/);
+  await expect(page.locator('#station-summary')).toContainText('W');
+  // The view is mirrored into the URL so it can be shared.
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('tx=');
+
   // Switch to Path mode.
   await page.click('#tab-path');
   await expect(page.locator('#mode-path')).toBeVisible();

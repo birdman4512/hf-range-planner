@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   maxHopGroundKm, hopGeometry, f2BasicMuf, f2Dmax, phi, preparePath, evalPath, analyzePath,
-  coverageGrids, statusFor, disturbanceAbsDb, pathMuf,
+  coverageGrids, statusFor, disturbanceAbsDb, pathMuf, bestBandAt,
 } from '../../src/propagation.js';
 import { buildIonoField } from '../../src/iono.js';
 import { reflectionLossDb, classifySurface, isLand } from '../../src/clutter.js';
@@ -146,4 +146,13 @@ test('status thresholds', () => {
   assert.equal(statusFor(0.8), 'open');
   assert.equal(statusFor(0.3), 'marginal');
   assert.equal(statusFor(0.05), 'closed');
+});
+
+test('best band per cell: highest reliability, near-ties go to the higher band', () => {
+  const g = (...v) => ({ cells: Uint8Array.from(v) });
+  // cell 0: 255 vs 250 (tie within 5 %) → higher band; cell 1: clear winner; cell 2: nothing.
+  const grids = [g(255, 255, 0), g(250, 100, 0)];
+  assert.deepEqual(bestBandAt(grids, 0), { index: 1, value: 250 });
+  assert.deepEqual(bestBandAt(grids, 1), { index: 0, value: 255 });
+  assert.equal(bestBandAt(grids, 2).index, -1);
 });
