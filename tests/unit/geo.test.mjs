@@ -53,3 +53,15 @@ test('night polygon is a closed ring that reaches the dark pole', () => {
   // Sun is north at the June solstice → the south pole is in darkness.
   assert.ok(ring.some(([lat]) => lat <= -89), 'closes toward the south pole');
 });
+
+test('Maidenhead locators round-trip and decode to the square centre', async () => {
+  const { maidenheadToLatLon, latLonToMaidenhead } = await import('../../src/geo.js');
+  const g = maidenheadToLatLon('JO01');           // London area: 51–52°N, 0–2°E
+  assert.ok(Math.abs(g.lat - 51.5) < 1e-9 && Math.abs(g.lon - 1) < 1e-9);
+  const p = maidenheadToLatLon('fn31pr');         // lower case accepted
+  assert.equal(latLonToMaidenhead(p.lat, p.lon), 'FN31pr');
+  assert.equal(latLonToMaidenhead(-33.87, 151.21), 'QF56od'); // Sydney
+  assert.ok(maidenheadToLatLon('FN31pr45'));
+  assert.equal(maidenheadToLatLon('ZZ99'), null);
+  assert.equal(maidenheadToLatLon('JO0'), null);
+});

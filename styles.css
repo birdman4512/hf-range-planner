@@ -378,3 +378,72 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 #caveat a { color: var(--accent-2, #58a6ff); }
 .snr { color: var(--muted); font-size: 11px; }
 .loss-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Header actions (share + collapse). */
+.brand-actions { display: flex; gap: 6px; }
+
+/* Locator / coordinate entry under each site. */
+.site .loc-input {
+  grid-column: 2 / 4;
+  height: 28px; font-size: 12px; padding: 0 8px;
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px;
+}
+.site .loc-input:focus { outline: none; border-color: var(--accent); }
+.site .loc-input.bad { border-color: var(--bad); }
+
+/* Coverage view switch (segmented control). */
+.view-switch { display: flex; margin: 0 0 10px; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.view-switch .seg {
+  flex: 1; height: 30px; border: 0; border-radius: 0; font-size: 12px;
+  background: var(--panel-2); color: var(--muted); cursor: pointer;
+}
+.view-switch .seg + .seg { border-left: 1px solid var(--border); }
+.view-switch .seg.active { background: var(--accent); color: #fff; }
+.band-toggles.disabled { opacity: .45; pointer-events: none; }
+
+/* UTC readout under the time field. */
+.utc-line { margin: 4px 0 0; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+/* One-line summary in a collapsed panel header. */
+.panel-summary {
+  flex: 1; margin: 0 8px; text-align: right; font-size: 11px; font-weight: 400;
+  text-transform: none; letter-spacing: 0; color: var(--muted);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.panel:not(.collapsed) .panel-summary { visibility: hidden; }
+
+/* "Why closed" tag in the path table. */
+.why { display: inline-block; margin-left: 4px; font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+/* Map legend (Leaflet control). */
+.map-legend {
+  background: rgba(14, 17, 22, .88); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; font-size: 11px; line-height: 1.5; max-width: 240px;
+}
+.map-legend .ramp { display: flex; height: 8px; border-radius: 4px; overflow: hidden; margin: 4px 0 2px; }
+.map-legend .ramp span { flex: 1; }
+.map-legend .ticks { display: flex; justify-content: space-between; color: var(--muted); }
+.map-legend .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin: 0 4px 0 0; vertical-align: -1px; }
+.map-legend .bands { display: grid; grid-template-columns: repeat(3, auto); gap: 0 10px; margin-top: 4px; }
+
+/* Map-click inspection popup. */
+.inspect table { border-collapse: collapse; font-size: 12px; }
+.inspect td { padding: 1px 6px 1px 0; }
+.inspect .open { color: var(--good); }
+.inspect .marginal { color: var(--warn); }
+.inspect .closed { color: var(--muted); }
+.inspect button { margin-top: 6px; width: 100%; }
+.inspect h4 { margin: 0 0 4px; font-size: 12px; }
+
+/* Busy indicator and toast over the map. */
+.busy, .toast {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 1000;
+  background: rgba(14, 17, 22, .92); color: var(--text);
+  border: 1px solid var(--border); border-radius: 999px;
+  padding: 6px 14px; font-size: 12px; pointer-events: none;
+}
+.busy { top: 12px; }
+.toast { bottom: 24px; }
+.busy[hidden], .toast[hidden] { display: none; }

@@ -36,7 +36,10 @@
           <h1>HF Range Planner</h1>
           <p class="tagline">Skywave coverage &amp; band picker for the HF bands</p>
         </div>
-        <button type="button" id="btn-collapse" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">‹</button>
+        <div class="brand-actions">
+          <button type="button" id="btn-share" class="icon-btn" title="Copy a link to this view" aria-label="Copy a link to this view">🔗</button>
+          <button type="button" id="btn-collapse" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">‹</button>
+        </div>
       </header>
 
       <!-- Primary intent: view coverage, or understand a path -->
@@ -62,6 +65,11 @@
               <button type="button" id="btn-pick-tx" class="ghost">On map</button>
               <button type="button" id="btn-loc-tx" class="ghost" title="Use my location">📍 Me</button>
             </div>
+            <input type="text" id="loc-tx" class="loc-input" placeholder="or type a locator / lat,lon — e.g. JO01ab" maxlength="24" autocomplete="off" spellcheck="false" aria-label="Locator or coordinates for TX" />
+          </div>
+          <div class="view-switch" role="group" aria-label="Coverage view">
+            <button type="button" id="view-bands" class="seg active" title="Map each selected band separately">Selected bands</button>
+            <button type="button" id="view-best" class="seg" title="Colour every region by its most reliable band">Best band</button>
           </div>
           <div class="band-toggles" id="band-toggles"></div>
           <button type="button" id="btn-recompute" class="primary">Recompute coverage</button>
@@ -78,6 +86,7 @@
               <button type="button" id="btn-pick-a" class="ghost">On map</button>
               <button type="button" id="btn-loc-a" class="ghost" title="Use my location for A">📍 Me</button>
             </div>
+            <input type="text" id="loc-a" class="loc-input" placeholder="or type a locator / lat,lon — e.g. JO01ab" maxlength="24" autocomplete="off" spellcheck="false" aria-label="Locator or coordinates for A" />
           </div>
           <div class="site" id="site-b">
             <span class="site-tag pin pin-b">B</span>
@@ -85,6 +94,7 @@
             <div class="site-actions">
               <button type="button" id="btn-pick-b" class="ghost">On map</button>
             </div>
+            <input type="text" id="loc-b" class="loc-input" placeholder="or type a locator / lat,lon — e.g. JO01ab" maxlength="24" autocomplete="off" spellcheck="false" aria-label="Locator or coordinates for B" />
           </div>
           <button type="button" id="btn-run-path" class="primary">Recommend band</button>
           <div class="results" id="path-results"></div>
@@ -113,6 +123,7 @@
           <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
           <button type="button" id="btn-noon" class="ghost" title="Set time to solar noon at your TX/A site">☼ Noon</button>
         </div>
+        <p class="utc-line" id="utc-line"></p>
         <div class="slider-row" title="Scrub forward in time to forecast how the bands open and close">
           <button type="button" id="btn-step-back" class="step" title="−1 hour" aria-label="Back one hour">◀</button>
           <input type="range" id="time-slider" min="0" max="72" step="1" value="0" />
@@ -130,7 +141,7 @@
 
       <!-- Station (applies to both modes) -->
       <section class="panel collapsible" id="panel-station">
-        <h2 class="panel-head">Your station<span class="chev">▾</span></h2>
+        <h2 class="panel-head">Your station<span class="panel-summary" id="station-summary"></span><span class="chev">▾</span></h2>
         <div class="panel-body">
         <div class="grid2">
           <label>TX power (W)
@@ -184,10 +195,14 @@
            calibrated against WSPR. Reliability = probability the path supports your mode. Still a model:
            sporadic-E is only known where an ionosonde sees it.
            <a href="tools/validate.html">Validate against WSPR →</a></p>
+        <p>Ionosonde data: <a href="https://giro.uml.edu/">GIRO</a> / Lowell GIRO Data Center and its
+           station operators, via KC2G — <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>.</p>
       </footer>
     </aside>
 
     <main id="map" aria-label="Propagation map"></main>
+    <div id="busy" class="busy" hidden>Computing coverage…</div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <button type="button" id="btn-expand" class="icon-btn" title="Show panel" aria-label="Show panel" hidden>☰</button>
   </div>
 

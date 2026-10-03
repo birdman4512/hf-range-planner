@@ -34,9 +34,25 @@ jobs:
         run: |
           mkdir out && mv stations.json out/
           cd out
+          # GIRO data is CC BY-NC-SA 4.0: redistributed copies must carry the
+          # attribution and licence.
+          cat > README.md <<'TXT'
+          # Ionosonde data mirror
+
+          `stations.json` is an unmodified copy of https://prop.kc2g.com/api/stations.json,
+          refreshed every 15 minutes for the HF Range Planner (non-commercial).
+
+          The measurements come from the Global Ionospheric Radio Observatory (GIRO),
+          via the Lowell GIRO Data Center (https://giro.uml.edu/) and its participating
+          station operators, aggregated by KC2G (https://prop.kc2g.com/).
+
+          Licence: Creative Commons Attribution-NonCommercial-ShareAlike 4.0
+          (https://creativecommons.org/licenses/by-nc-sa/4.0/). Credit GIRO, LGDC and the
+          station operators; no commercial use; derivatives under the same licence.
+          TXT
           git init -q -b data
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add stations.json
+          git add stations.json README.md
           git commit -qm "Ionosonde snapshot $(date -u +%Y-%m-%dT%H:%MZ) (GIRO via KC2G)"
           git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data

@@ -25,6 +25,20 @@ connection).
 > WSPR receptions (see *Validation*), but it is not a certified P.533 implementation, and
 > sporadic-E is only known where an ionosonde sees it.
 
+## Using it
+
+- **Place sites** by clicking *On map*, using 📍 *Me*, or typing a Maidenhead locator
+  (`JO01ab`) or `lat, lon` into the box under each site.
+- **Coverage → Selected bands** maps each band you toggle on. **Best band** colours every
+  region by its most reliable band (near-ties go to the higher band).
+- **Click anywhere on the map** in Coverage mode for a per-band prediction to that point,
+  then *Full path analysis →* to open it in Path mode.
+- **Path / Band** marks why each closed band fails (*above MUF*, *absorbed*, *too weak*). The
+  24-hour chart shows UTC when you hover a cell.
+- Your station, sites, bands and view are **remembered in this browser** and mirrored in the
+  URL. **🔗** copies a link to the current view, including the time if you've moved off "now".
+- Coverage is computed in a background Web Worker, so the map stays responsive.
+
 ## Does it work locally? (Yes)
 
 It's pure static files — HTML, CSS, and ES-module JavaScript. **No build step, no bundler.**
