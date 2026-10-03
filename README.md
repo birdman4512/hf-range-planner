@@ -37,6 +37,12 @@ connection).
   24-hour chart shows UTC when you hover a cell.
 - Your station, sites, bands and view are **remembered in this browser** and mirrored in the
   URL. **🔗** copies a link to the current view, including the time if you've moved off "now".
+- **Time** is the bar along the bottom of the map: scrub up to 72 h ahead, step ±1 h, or
+  jump to *Now* or the site's solar *Noon*. **Layers** (day/night, KC2G MUF, ground model,
+  ionosondes) are the toggles under the zoom buttons.
+- **Conditions** and **Your station** collapse to one-line summaries; open them to override
+  the live indices or change your setup. Less common station settings are under *Advanced*.
+- **ⓘ** shows the methodology, data sources and licences, and links to the WSPR validation.
 - Coverage is computed in a background Web Worker, so the map stays responsive.
 
 ## Does it work locally? (Yes)

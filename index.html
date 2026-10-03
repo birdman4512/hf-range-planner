@@ -37,6 +37,7 @@
           <p class="tagline">Skywave coverage &amp; band picker for the HF bands</p>
         </div>
         <div class="brand-actions">
+          <button type="button" id="btn-about" class="icon-btn" title="About, data sources and validation" aria-label="About">ⓘ</button>
           <button type="button" id="btn-share" class="icon-btn" title="Copy a link to this view" aria-label="Copy a link to this view">🔗</button>
           <button type="button" id="btn-collapse" class="icon-btn" title="Collapse panel" aria-label="Collapse panel">‹</button>
         </div>
@@ -57,7 +58,6 @@
 
         <!-- Mode A: frequency -> footprint -->
         <div class="mode-body" id="mode-coverage">
-          <p class="hint">Set a TX site, then toggle bands to map where each lands.</p>
           <div class="site" id="site-tx">
             <span class="site-tag pin pin-tx">TX</span>
             <span id="tx-coords" class="coords">not set</span>
@@ -72,13 +72,11 @@
             <button type="button" id="view-best" class="seg" title="Colour every region by its most reliable band">Best band</button>
           </div>
           <div class="band-toggles" id="band-toggles"></div>
-          <button type="button" id="btn-recompute" class="primary">Recompute coverage</button>
           <div class="results" id="coverage-results"></div>
         </div>
 
         <!-- Mode B: two points -> band -->
         <div class="mode-body hidden" id="mode-path">
-          <p class="hint">Drop two markers; get the best band for that path right now.</p>
           <div class="site" id="site-a">
             <span class="site-tag pin pin-a">A</span>
             <span id="a-coords" class="coords">not set</span>
@@ -101,10 +99,16 @@
         </div>
       </section>
 
-      <!-- Solar weather -->
-      <section class="panel collapsible" id="panel-solar">
-        <h2 class="panel-head">Solar &amp; ionospheric conditions<span class="chev">▾</span></h2>
+      <!-- Conditions: live by default; one-line summary when collapsed -->
+      <section class="panel collapsible collapsed" id="panel-solar">
+        <h2 class="panel-head">Conditions<span class="panel-summary" id="cond-summary">loading…</span><span class="chev">▾</span></h2>
         <div class="panel-body">
+        <ul class="wx-list" id="wx-list"></ul>
+        <div class="status-line">
+          <span id="solar-status">Loading live data…</span>
+          <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>
+        </div>
+        <p class="sub-head">Override (normally filled from live data)</p>
         <div class="grid3">
           <label title="12-month smoothed sunspot number on the CCIR (v1) scale — the index the ionospheric maps use. Live value = SWPC predicted R12 × 0.7.">R12 (smoothed)
             <input type="number" id="in-ssn" min="0" max="250" step="1" />
@@ -116,26 +120,6 @@
             <input type="number" id="in-kp" min="0" max="9" step="0.1" />
           </label>
         </div>
-        <div class="time-row">
-          <label title="Local solar time at your TX/A site (derived from longitude)">Local time @ site
-            <input type="datetime-local" id="in-time" />
-          </label>
-          <button type="button" id="btn-now" class="ghost" title="Use current time">Now</button>
-          <button type="button" id="btn-noon" class="ghost" title="Set time to solar noon at your TX/A site">☼ Noon</button>
-        </div>
-        <p class="utc-line" id="utc-line"></p>
-        <div class="slider-row" title="Scrub forward in time to forecast how the bands open and close">
-          <button type="button" id="btn-step-back" class="step" title="−1 hour" aria-label="Back one hour">◀</button>
-          <input type="range" id="time-slider" min="0" max="72" step="1" value="0" />
-          <button type="button" id="btn-step-fwd" class="step" title="+1 hour" aria-label="Forward one hour">▶</button>
-          <span id="slider-label" class="slider-label">now</span>
-        </div>
-        <p id="forecast-note" class="forecast-note"></p>
-        <div class="status-line">
-          <span id="solar-status">Loading live data…</span>
-          <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>
-        </div>
-        <ul class="wx-list" id="wx-list"></ul>
         </div>
       </section>
 
@@ -150,60 +134,83 @@
           <label title="Weak-signal modes (FT8, WSPR) decode far below the noise, so they reach much further than SSB">Mode
             <select id="in-mode"></select>
           </label>
-        </div>
-        <div class="grid2">
           <label>My antenna
             <select id="in-ant" class="ant-select"></select>
           </label>
           <label title="Height above ground — sets the elevation pattern (low dipoles favour NVIS, high ones DX)">Height (m)
             <input type="number" id="in-ant-h" min="1" max="100" step="1" value="10" />
           </label>
-          <label>Other station's antenna
-            <select id="in-rx-ant" class="ant-select"></select>
-          </label>
-          <label>Height (m)
-            <input type="number" id="in-rx-ant-h" min="1" max="100" step="1" value="10" />
-          </label>
-        </div>
-        <div class="grid2">
           <label title="Man-made noise at the receiver (ITU-R P.372). Atmospheric and galactic noise are added automatically.">Receive noise
             <select id="in-noise"></select>
           </label>
-          <label title="Lowest elevation angle considered for a hop (ITU-R P.533 uses 3°)">Min takeoff (°)
-            <input type="number" id="in-takeoff" min="0" max="60" step="1" value="3" />
-          </label>
         </div>
-        </div>
-      </section>
-
-      <!-- Layers -->
-      <section class="panel collapsible" id="panel-layers">
-        <h2 class="panel-head">Layers<span class="chev">▾</span></h2>
-        <div class="panel-body">
-        <div class="layer-btns">
-          <label class="layer-btn lyr-day" title="Day/night terminator"><input type="checkbox" id="lyr-terminator" checked /><span>Day/night</span></label>
-          <label class="layer-btn lyr-muf" title="KC2G MUF reference overlay"><input type="checkbox" id="lyr-kc2g" /><span>KC2G</span></label>
-          <label class="layer-btn lyr-clut" title="Fresnel ground-reflection loss from a land/sea/ice map (off: ITU fixed 2 dB per bounce)"><input type="checkbox" id="lyr-clutter" checked /><span>Ground</span></label>
-          <label class="layer-btn lyr-iono" title="Live ionosonde stations used to correct the model"><input type="checkbox" id="lyr-iono" /><span>Ionosondes</span></label>
-        </div>
+        <details class="advanced">
+          <summary>Advanced</summary>
+          <div class="grid2">
+            <label>Other station's antenna
+              <select id="in-rx-ant" class="ant-select"></select>
+            </label>
+            <label>Height (m)
+              <input type="number" id="in-rx-ant-h" min="1" max="100" step="1" value="10" />
+            </label>
+            <label title="Lowest elevation angle considered for a hop (ITU-R P.533 uses 3°)">Min takeoff (°)
+              <input type="number" id="in-takeoff" min="0" max="60" step="1" value="3" />
+            </label>
+          </div>
+        </details>
         </div>
       </section>
-
-      <footer id="caveat">
-        <p>Monthly-median CCIR ionosphere (ITU-R P.1239) corrected by live GIRO ionosondes via
-           <a href="https://prop.kc2g.com/">KC2G</a>, with an ITU-R P.533-style link budget and P.372 noise,
-           calibrated against WSPR. Reliability = probability the path supports your mode. Still a model:
-           sporadic-E is only known where an ionosonde sees it.
-           <a href="tools/validate.html">Validate against WSPR →</a></p>
-        <p>Ionosonde data: <a href="https://giro.uml.edu/">GIRO</a> / Lowell GIRO Data Center and its
-           station operators, via KC2G — <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>.</p>
-      </footer>
     </aside>
 
-    <main id="map" aria-label="Propagation map"></main>
+    <div id="map-wrap">
+      <main id="map" aria-label="Propagation map"></main>
+
+      <!-- Time: scrub forward to see how the bands open and close -->
+      <div id="timebar" class="timebar" role="group" aria-label="Time">
+        <div class="tb-row">
+          <button type="button" id="btn-step-back" class="step" title="−1 hour" aria-label="Back one hour">◀</button>
+          <input type="range" id="time-slider" min="0" max="72" step="1" value="0" aria-label="Hours ahead" />
+          <button type="button" id="btn-step-fwd" class="step" title="+1 hour" aria-label="Forward one hour">▶</button>
+          <span id="slider-label" class="slider-label">now</span>
+          <input type="datetime-local" id="in-time" title="Solar time at your TX/A site (derived from longitude)" aria-label="Solar time at site" />
+          <button type="button" id="btn-now" class="ghost" title="Back to the current time">Now</button>
+          <button type="button" id="btn-noon" class="ghost" title="Solar noon at your TX/A site">☼ Noon</button>
+        </div>
+        <div class="tb-sub"><span class="utc-line" id="utc-line"></span><span id="forecast-note" class="forecast-note"></span></div>
+      </div>
+    </div>
+
+    <!-- Map layer toggles: moved into a Leaflet control by app.js -->
+    <div id="layer-btns" class="layer-btns" hidden>
+      <label class="layer-btn lyr-day" title="Day/night terminator"><input type="checkbox" id="lyr-terminator" checked /><span>Day/night</span></label>
+      <label class="layer-btn lyr-muf" title="KC2G MUF reference overlay"><input type="checkbox" id="lyr-kc2g" /><span>KC2G MUF</span></label>
+      <label class="layer-btn lyr-clut" title="Fresnel ground-reflection loss from a land/sea/ice map (off: ITU fixed 2 dB per bounce)"><input type="checkbox" id="lyr-clutter" checked /><span>Ground</span></label>
+      <label class="layer-btn lyr-iono" title="Live ionosonde stations used to correct the model"><input type="checkbox" id="lyr-iono" /><span>Ionosondes</span></label>
+    </div>
+
     <div id="busy" class="busy" hidden>Computing coverage…</div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
     <button type="button" id="btn-expand" class="icon-btn" title="Show panel" aria-label="Show panel" hidden>☰</button>
+
+    <dialog id="about" class="about" aria-labelledby="about-title">
+      <h2 id="about-title">About HF Range Planner</h2>
+      <p>The ionosphere is the monthly-median CCIR model (ITU-R P.1239), corrected in real time by live
+         GIRO ionosondes. Each path gets an ITU-R P.533-style link budget with ITU-R P.372 noise, and the result
+         is calibrated against WSPR reception data. <b>Reliability</b> is the probability that a path supports
+         your chosen mode with your station.</p>
+      <p>It is still a model: sporadic-E is only known where an ionosonde sees it, and very long paths use
+         a hop-by-hop approximation.</p>
+      <p><a href="tools/validate.html">Validate the model against live WSPR data →</a></p>
+      <h3>Data sources</h3>
+      <ul>
+        <li>Ionosondes: <a href="https://giro.uml.edu/">GIRO</a> / Lowell GIRO Data Center and its station operators,
+            via <a href="https://prop.kc2g.com/">KC2G</a> —
+            <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/">CC BY-NC-SA 4.0</a>.</li>
+        <li>Space weather: <a href="https://www.swpc.noaa.gov/">NOAA SWPC</a>.</li>
+        <li>Models &amp; maps: ITU-R CCIR coefficients, IGRF-14 (IAGA), Natural Earth; map tiles © OpenStreetMap.</li>
+      </ul>
+      <div class="about-actions"><button type="button" id="btn-about-close" class="primary">Close</button></div>
+    </dialog>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

@@ -196,15 +196,26 @@ button.primary {
 button.primary:hover { filter: brightness(1.08); }
 button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
-/* Time row: input grows, Now button aligns to its bottom. */
-.time-row { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: end; margin-top: 10px; }
-
-.slider-row { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
-.slider-row .step { width: 26px; height: 26px; flex: none; padding: 0; font-size: 10px; color: var(--muted); }
-.slider-row .step:hover { border-color: var(--accent); color: #fff; }
-#time-slider { flex: 1; accent-color: var(--accent); min-width: 0; }
-.slider-label { font-size: 11px; color: var(--muted); min-width: 54px; text-align: right; font-variant-numeric: tabular-nums; }
-.forecast-note { margin: 6px 0 0; font-size: 11px; color: var(--accent-2); min-height: 0; }
+/* Time bar along the bottom of the map. */
+:root { --timebar-h: 64px; }
+.timebar {
+  position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 1000;
+  max-width: 820px; margin: 0 auto;
+  background: rgba(22, 27, 34, .94); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, .45);
+  padding: 8px 10px 6px;
+}
+.tb-row { display: flex; align-items: center; gap: 8px; }
+.tb-row .step { width: 28px; height: 28px; flex: none; padding: 0; font-size: 10px; color: var(--muted); }
+.tb-row .step:hover { border-color: var(--accent); color: #fff; }
+#time-slider { flex: 1; accent-color: var(--accent); min-width: 80px; height: 28px; padding: 0; background: none; border: 0; }
+.slider-label { font-size: 11px; color: var(--muted); min-width: 40px; text-align: right; font-variant-numeric: tabular-nums; }
+.tb-row input[type="datetime-local"] { width: auto; flex: none; height: 30px; font-size: 12px; }
+.tb-row button.ghost { height: 30px; padding: 0 10px; font-size: 12px; }
+.tb-sub { display: flex; gap: 12px; justify-content: space-between; margin-top: 3px; min-height: 15px; }
+.forecast-note { font-size: 11px; color: var(--accent-2); }
+/* Lift Leaflet's bottom controls (legend, attribution) clear of the time bar. */
+#map .leaflet-bottom { bottom: calc(var(--timebar-h) + 14px); }
 
 /* Path 24-hour band-opening chart */
 .bandchart { margin-top: 10px; font-size: 10px; }
@@ -354,8 +365,8 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 /* Legend dots in coverage results (colour set from JS) */
 .bdot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px; vertical-align: middle; }
 
-#caveat { margin-top: auto; padding: 12px 16px; color: var(--muted); font-size: 11px; }
 
+#map-wrap { position: relative; min-width: 0; min-height: 0; }
 #map { height: 100%; width: 100%; background: #0a0d11; }
 
 .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--panel-2); color: var(--text); }
@@ -364,7 +375,12 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 
 @media (max-width: 720px) {
   #app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
-  #sidebar { width: 100%; max-height: 55vh; }
+  #sidebar { width: 100%; max-height: 50vh; }
+  .timebar { left: 6px; right: 6px; bottom: 6px; padding: 6px 8px 4px; }
+  .tb-row { flex-wrap: wrap; row-gap: 6px; }
+  #time-slider { flex-basis: 40%; }
+  .tb-row input[type="datetime-local"] { flex: 1; }
+  :root { --timebar-h: 92px; }
   /* Collapse vertically (slide the panel up) on narrow screens. */
   #app.collapsed { grid-template-columns: 1fr; grid-template-rows: 0 1fr; }
   #app.collapsed #sidebar { transform: translateY(-100%); }
@@ -375,7 +391,6 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 .wx-list b { color: var(--text, #c9d1d9); font-weight: 600; }
 .wx-list .warn { color: var(--warn); }
 .lyr-iono { --c: #79c0ff; }
-#caveat a { color: var(--accent-2, #58a6ff); }
 .snr { color: var(--muted); font-size: 11px; }
 .loss-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
 
@@ -403,7 +418,7 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 .band-toggles.disabled { opacity: .45; pointer-events: none; }
 
 /* UTC readout under the time field. */
-.utc-line { margin: 4px 0 0; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.utc-line { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* One-line summary in a collapsed panel header. */
 .panel-summary {
@@ -447,3 +462,52 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
 .busy { top: 12px; }
 .toast { bottom: 24px; }
 .busy[hidden], .toast[hidden] { display: none; }
+
+/* Map layer toggles as a Leaflet control (top-right, under zoom). */
+.leaflet-control.layer-btns {
+  display: flex; flex-direction: column; gap: 4px;
+  background: rgba(22, 27, 34, .94); padding: 6px; border-radius: 9px;
+  border: 1px solid var(--border); box-shadow: 0 2px 8px rgba(0, 0, 0, .4);
+}
+.leaflet-control.layer-btns .layer-btn { flex: none; flex-direction: row; justify-content: flex-start; padding: 5px 9px; font-size: 11px; }
+.layer-btns[hidden] { display: none; }
+
+/* Small heading inside a panel body. */
+.sub-head { margin: 12px 0 6px; font-size: 11px; color: var(--muted); }
+
+/* "Advanced" disclosure in the station panel. */
+.advanced { margin-top: 10px; }
+.advanced summary {
+  cursor: pointer; font-size: 11px; color: var(--muted); user-select: none;
+  list-style: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.advanced summary::-webkit-details-marker { display: none; }
+.advanced summary::before { content: '▸'; font-size: 9px; transition: transform .15s ease; }
+.advanced[open] summary::before { transform: rotate(90deg); }
+.advanced summary:hover { color: var(--text); }
+.advanced .grid2 { margin-top: 8px; }
+
+/* Conditions summary turns amber when there's a disturbance. */
+.panel-summary.warn { color: var(--warn); }
+
+/* About dialog. */
+.about {
+  max-width: 520px; width: calc(100% - 32px);
+  background: var(--panel); color: var(--text);
+  border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  font-size: 13px; line-height: 1.55;
+}
+.about::backdrop { background: rgba(0, 0, 0, .55); }
+.about h2 { margin: 0 0 10px; font-size: 16px; }
+.about h3 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+.about ul { margin: 0; padding-left: 18px; }
+.about a { color: var(--accent-2); }
+.about-actions { margin-top: 12px; }
+
+/* Phones: keep map overlays small so the map itself stays visible. */
+@media (max-width: 720px) {
+  .leaflet-control.layer-btns { padding: 4px; gap: 3px; }
+  .leaflet-control.layer-btns .layer-btn { padding: 3px 7px; font-size: 10px; gap: 5px; }
+  .leaflet-control.layer-btns .layer-btn::before { width: 10px; height: 10px; }
+  .map-legend { padding: 5px 7px; font-size: 10px; max-width: 170px; }
+}

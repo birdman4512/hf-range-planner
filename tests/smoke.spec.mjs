@@ -31,6 +31,14 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   // The view is mirrored into the URL so it can be shared.
   await expect.poll(() => page.evaluate(() => location.hash)).toContain('tx=');
 
+  // Time bar and layer toggles live on the map; About opens as a dialog.
+  await expect(page.locator('#map-wrap #timebar')).toBeVisible();
+  await expect(page.locator('#map .leaflet-control.layer-btns')).toBeVisible();
+  await page.click('#btn-about');
+  await expect(page.locator('#about')).toBeVisible();
+  await page.click('#btn-about-close');
+  await expect(page.locator('#about')).toBeHidden();
+
   // Switch to Path mode.
   await page.click('#tab-path');
   await expect(page.locator('#mode-path')).toBeVisible();
