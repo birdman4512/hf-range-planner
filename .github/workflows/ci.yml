@@ -43,6 +43,7 @@ jobs:
           cp index.html styles.css app.js sw.js manifest.webmanifest _site/
           cp icon.svg icon-180.png icon-192.png icon-512.png _site/
           cp -r src _site/src
+          cp -r tools _site/tools
           if [ -d data ]; then cp -r data _site/data; fi
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

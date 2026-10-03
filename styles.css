@@ -369,3 +369,12 @@ tr.band-row.selected { outline: 1px solid var(--accent); background: rgba(47,129
   #app.collapsed { grid-template-columns: 1fr; grid-template-rows: 0 1fr; }
   #app.collapsed #sidebar { transform: translateY(-100%); }
 }
+
+/* Live space-weather / ionosonde readout under the solar panel. */
+.wx-list { list-style: none; margin: 6px 0 0; padding: 0; font-size: 11px; color: var(--muted); display: grid; gap: 2px; }
+.wx-list b { color: var(--text, #c9d1d9); font-weight: 600; }
+.wx-list .warn { color: var(--warn); }
+.lyr-iono { --c: #79c0ff; }
+#caveat a { color: var(--accent-2, #58a6ff); }
+.snr { color: var(--muted); font-size: 11px; }
+.loss-table td:last-child { text-align: right; font-variant-numeric: tabular-nums; }

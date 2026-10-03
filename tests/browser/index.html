@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>unit tests</title>
+  <!-- Runs tests/unit/*.test.mjs in a browser (no Node needed): serve the repo
+       root over HTTP and open /tests/browser/index.html. Headless:
+       msedge --headless=new --dump-dom http://localhost:8080/tests/browser/index.html -->
+  <script type="importmap">
+    { "imports": { "node:test": "./shim-test.js", "node:assert/strict": "./shim-assert.js" } }
+  </script>
+  <style>body { font: 13px/1.4 ui-monospace, Consolas, monospace; background: #0e1116; color: #c9d1d9; padding: 16px; }</style>
+</head>
+<body>
+  <pre id="out">running…</pre>
+  <script type="module">
+    import { runQueued } from './shim-test.js';
+    const FILES = ['geo', 'magnetic', 'iono', 'propagation', 'noise', 'assimilate', 'validate'];
+    const out = document.getElementById('out');
+    const lines = [];
+    const log = (s) => { lines.push(s); out.textContent = lines.join('\n'); };
+    let pass = 0, fail = 0;
+    for (const f of FILES) {
+      log(`# ${f}`);
+      try {
+        await import(`../unit/${f}.test.mjs`);
+        const r = await runQueued(log);
+        pass += r.pass; fail += r.fail;
+      } catch (e) {
+        fail++;
+        log(`FAIL loading ${f}: ${e && e.stack ? e.stack : e}`);
+      }
+    }
+    log(`\n${fail ? 'FAILED' : 'PASSED'}: ${pass} passed, ${fail} failed`);
+    document.title = `${fail ? 'FAIL' : 'PASS'} ${pass}/${pass + fail}`;
+    out.dataset.done = '1';
+  </script>
+</body>
+</html>

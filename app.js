@@ -2,11 +2,19 @@
 // wires them to the Leaflet map and the sidebar controls.
 
 import { subsolarPoint, destinationPoint, cosZenith } from './src/geo.js';
-import { fetchSpaceWeather, fetchForecast, ssnFromSfi } from './src/solar.js';
+import { fetchSpaceWeather, fetchForecast, fetchIonosondes, flareClass } from './src/solar.js';
 import { BANDS, MODES, modeByName } from './src/bands.js';
-import { analyzePath, coverageGrid, bandStatus, mufGraceFor } from './src/propagation.js';
-import { groundReflectionLossDb } from './src/clutter.js';
-import { makeTerminator, makeKc2gOverlay, makeFootprintRaster, makePath } from './src/overlays.js';
+import { ionoField } from './src/iono.js';
+import { parseStations } from './src/assimilate.js';
+import { ANTENNAS } from './src/antenna.js';
+import { NOISE_ENVIRONMENTS } from './src/noise.js';
+import {
+  preparePath, evalPath, analyzePath, coverageGrids, statusFor,
+} from './src/propagation.js';
+import { SURFACE } from './src/clutter.js';
+import {
+  makeTerminator, makeKc2gOverlay, makeFootprintRaster, makePath, makeIonosondeMarkers,
+} from './src/overlays.js';
 
 const L = window.L;
 const $ = (id) => document.getElementById(id);
@@ -20,10 +28,12 @@ const state = {
   anchorTime: Date.now(),
   forecast: [],
   liveSolar: null,
+  stations: null,          // parsed ionosonde observations (or null)
   activeBands: new Set(),
   bandLayers: {},
+  prepCache: { key: '', map: new Map() },
   markers: { tx: null, a: null, b: null },
-  layers: { terminator: null, kc2g: null, result: null, bandCoverage: null },
+  layers: { terminator: null, kc2g: null, result: null, bandCoverage: null, iono: null },
 };
 
 const PIN_LABEL = { tx: 'TX', a: 'A', b: 'B' };
@@ -92,12 +102,54 @@ function setPoint(which, p) {
   if (which === 'tx') renderActiveBands();
 }
 
-// --- Conditions / time ---------------------------------------------------
+// --- Conditions / model inputs -------------------------------------------
 
 function getConditions() {
-  const ssn = Number($('in-ssn').value) || 0;
+  const r12 = Number($('in-ssn').value);
   const kp = Number($('in-kp').value) || 0;
-  return { ssn, kp };
+  return { r12: Number.isFinite(r12) ? r12 : 60, kp };
+}
+
+/** The ionospheric field for an instant (cached), with live ionosondes folded in. */
+function getField(date = state.timeUTC) {
+  const { r12, kp } = getConditions();
+  return ionoField({ date, r12, kp, stations: state.stations, nowMs: Date.now() });
+}
+
+/** Live flare / proton data only applies near "now". */
+function spaceWxFor(date) {
+  const { kp } = getConditions();
+  const sw = { kp };
+  const live = state.liveSolar;
+  if (!live) return sw;
+  const dtH = Math.abs(date.getTime() - Date.now()) / 3600e3;
+  if (live.xray && dtH < 1) sw.xrayWm2 = live.xray.flux;
+  if (live.protons && dtH < 24) sw.protonPfu = live.protons.flux * Math.exp(-dtH / 12);
+  return sw;
+}
+
+function getSys(date = state.timeUTC) {
+  const mode = modeByName($('in-mode').value);
+  return {
+    powerW: Number($('in-power').value) || 100,
+    txAnt: { type: $('in-ant').value, heightM: Number($('in-ant-h').value) || 10 },
+    rxAnt: { type: $('in-rx-ant').value, heightM: Number($('in-rx-ant-h').value) || 10 },
+    reqDbHz: mode.reqDbHz,
+    noiseEnv: $('in-noise').value,
+    clutter: $('lyr-clutter').checked,
+    spaceWx: spaceWxFor(date),
+  };
+}
+
+const minTakeoff = () => {
+  const v = Number($('in-takeoff').value);
+  return Number.isFinite(v) ? v : 3;
+};
+
+/** SNR (dB-Hz) → SNR in the selected mode's conventional bandwidth. */
+function snrInBw(snrDbHz) {
+  const m = modeByName($('in-mode').value);
+  return snrDbHz - 10 * Math.log10(m.bwHz);
 }
 
 // The time field shows LOCAL (solar) time at the active site, derived from its
@@ -133,6 +185,7 @@ function readTimeInput() {
 
 // Re-run whichever mode is active (Path without re-framing; Coverage re-renders).
 function refreshActive() {
+  renderWx();
   if (state.mode === 'path') { if (state.a && state.b) runPath(false); }
   else renderActiveBands();
 }
@@ -146,27 +199,25 @@ function syncSlider() {
   }
 }
 
-function setIndices(sfi, kp) {
-  $('in-sfi').value = sfi;
-  $('in-ssn').value = ssnFromSfi(sfi);
-  $('in-kp').value = kp;
-}
-
-// On a future day, apply that day's NOAA 27-day forecast SFI/Kp; on today/past,
-// restore the live values.
+// On a future day, apply that day's NOAA 27-day forecast Kp (and show its SFI);
+// on today/past, restore the live values. R12 is a 12-month mean — unchanged.
 function applyIndicesForTime() {
   const now = new Date();
   const dayStart = Date.UTC(state.timeUTC.getUTCFullYear(), state.timeUTC.getUTCMonth(), state.timeUTC.getUTCDate());
   const todayStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   if (dayStart <= todayStart || !state.forecast.length) {
-    if (state.liveSolar) setIndices(state.liveSolar.sfi, state.liveSolar.kp);
+    if (state.liveSolar) {
+      $('in-kp').value = state.liveSolar.kp;
+      if (state.liveSolar.sfi != null) $('in-sfi').value = state.liveSolar.sfi;
+    }
     $('forecast-note').textContent = '';
     return;
   }
   let row = state.forecast.find((r) => r.date === dayStart);
   if (!row) row = state.forecast.reduce((b, r) => (Math.abs(r.date - dayStart) < Math.abs(b.date - dayStart) ? r : b));
   if (row) {
-    setIndices(row.sfi, row.kp);
+    $('in-kp').value = row.kp;
+    $('in-sfi').value = row.sfi;
     $('forecast-note').textContent =
       `NOAA forecast for ${new Date(row.date).toUTCString().slice(5, 11)}: SFI ${row.sfi}, Kp ${row.kp}`;
   }
@@ -193,7 +244,7 @@ function setNoonAtSite() {
   state.timeUTC = new Date(noonWall - tzOffsetMs());
   renderTimeInput();
   redrawTerminator();
-  renderActiveBands();
+  refreshActive();
 }
 
 function redrawTerminator() {
@@ -202,40 +253,63 @@ function redrawTerminator() {
   state.layers.terminator = makeTerminator(getSubsolar()).addTo(state.map);
 }
 
-// --- Solar fetch ---------------------------------------------------------
+// --- Live data -------------------------------------------------------------
 
 async function loadSolar() {
   $('solar-status').textContent = 'Loading live data…';
   const sw = await fetchSpaceWeather();
-  state.liveSolar = { sfi: sw.sfi, ssn: sw.ssn, kp: sw.kp };
-  $('in-sfi').value = sw.sfi;
-  $('in-ssn').value = sw.ssn;
+  state.liveSolar = sw;
+  $('in-ssn').value = sw.r12;
+  if (sw.sfi != null) $('in-sfi').value = sw.sfi;
   $('in-kp').value = sw.kp;
-  if (sw.ok) {
-    const ts = sw.timestamp ? ` (${sw.timestamp} UTC)` : '';
-    $('solar-status').textContent = `Live: ${sw.source}${ts}`;
-  } else {
-    $('solar-status').textContent = `Live fetch failed — using defaults. Edit values to override.`;
-  }
-  renderActiveBands();
+  $('solar-status').textContent = sw.ok
+    ? `Live: NOAA SWPC${sw.timestamp ? ` (${sw.timestamp} UTC)` : ''}`
+    : `Partial live data (missing ${sw.errors.join(', ')}) — edit values to override.`;
+  applyIndicesForTime();
+  refreshActive();
 }
 
-// --- Mode A: coverage footprint ------------------------------------------
+async function loadIonosondes() {
+  const raw = await fetchIonosondes();
+  state.stations = raw ? parseStations(raw) : null;
+  redrawIonosondes();
+  refreshActive();
+}
+
+/** Space-weather / ionosphere readout under the solar panel. */
+function renderWx() {
+  const items = [];
+  const live = state.liveSolar;
+  if (live && live.r12V2 != null) {
+    items.push(`R12 <b>${live.r12}</b> (SWPC ${live.r12Source}: ${live.r12V2} on the v2 scale)`);
+  }
+  const f = getField();
+  if (f.assimilated) {
+    items.push(`Ionosondes: <b>${f.stationsUsed}</b> live · effective R12 <b>${f.r12Used.toFixed(0)}</b>` +
+      (f.r12Fit != null ? ` (fit ${f.r12Fit})` : ''));
+  } else {
+    items.push(state.stations ? 'Ionosondes: too few recent stations — median model only'
+      : 'Ionosondes: unavailable — monthly-median model only');
+  }
+  if (live && live.xray) {
+    const cls = flareClass(live.xray.flux);
+    const hot = live.xray.flux >= 1e-5;
+    items.push(`<span class="${hot ? 'warn' : ''}">X-ray <b>${cls}</b>${hot ? ' — flare absorption on the dayside' : ''}</span>`);
+  }
+  if (live && live.protons) {
+    const hot = live.protons.flux >= 10;
+    items.push(`<span class="${hot ? 'warn' : ''}">Protons ≥10 MeV <b>${live.protons.flux.toFixed(1)}</b> pfu${hot ? ' — polar-cap absorption' : ''}</span>`);
+  }
+  const kp = getConditions().kp;
+  if (kp >= 5) items.push(`<span class="warn">Kp ${kp}: geomagnetic storm — F2 depressed, auroral absorption</span>`);
+  $('wx-list').innerHTML = items.map((s) => `<li>${s}</li>`).join('');
+}
+
+// --- Mode A: coverage --------------------------------------------------------
 
 function clearResultLayer() {
   if (state.layers.result) { state.map.removeLayer(state.layers.result); state.layers.result = null; }
   clearBandCoverage();
-}
-
-function getCoverageEnv() {
-  const { ssn, kp } = getConditions();
-  return {
-    ssn, kp,
-    subsolar: getSubsolar(),
-    powerW: Number($('in-power').value) || 100,
-    minTakeoffDeg: Number($('in-takeoff').value) || 3,
-    modeMarginDb: modeByName($('in-mode').value).marginDb,
-  };
 }
 
 function clearBandLayers() {
@@ -245,16 +319,32 @@ function clearBandLayers() {
   }
 }
 
-// Why is a band giving no coverage right now? First check whether the TX is in
-// darkness (the usual cause for a high band), then sample a 2500 km path east.
-function bandDiagnosis(band, env) {
-  const cz = cosZenith(state.tx.lat, state.tx.lon, env.subsolar);
-  if (cz < 0.02 && band.mhz > 10) return 'your TX is in darkness — high bands need daylight (try ☼ Noon, or a lower band)';
-  const [rxLat, rxLon] = destinationPoint(state.tx.lat, state.tx.lon, 90, 2500);
-  const a = analyzePath({ lat1: state.tx.lat, lon1: state.tx.lon, lat2: rxLat, lon2: rxLon, ...env });
-  if (band.mhz > a.mufMhz) return 'above MUF — sun is low; try ☼ Noon or a lower band';
-  if (band.mhz < a.lufMhz) return 'D-layer absorbed — try after dark';
-  return 'closed here, open on other paths';
+/** Path preparations depend on TX, time, ionosphere and takeoff only — share them across bands. */
+function prepCacheFor(origin, field) {
+  const key = [origin.lat, origin.lon, field.date.getTime(), field.r12, field.kp,
+    state.stations ? state.stations.version : 0, minTakeoff()].join('|');
+  if (state.prepCache.key !== key) state.prepCache = { key, map: new Map() };
+  return state.prepCache.map;
+}
+
+// Why is a band giving no coverage right now? Probe a few representative paths
+// and report the limiting factor of the best one.
+function bandDiagnosis(band, field, sys) {
+  const cz = cosZenith(state.tx.lat, state.tx.lon, field.subsolar);
+  let best = null;
+  for (const az of [0, 90, 180, 270]) {
+    for (const d of [800, 2000, 4000, 8000]) {
+      const [la, lo] = destinationPoint(state.tx.lat, state.tx.lon, az, d);
+      const r = evalPath(preparePath({ lat1: state.tx.lat, lon1: state.tx.lon, lat2: la, lon2: lo, field, minTakeoffDeg: minTakeoff() }), band.mhz, sys);
+      if (!best || r.reliability > best.reliability) best = r;
+    }
+  }
+  if (best && best.limit === 'muf') {
+    return cz < 0.02 && band.mhz > 10 ? 'above the MUF — your TX is in darkness; try ☼ Noon or a lower band'
+      : 'above the MUF right now — try a lower band';
+  }
+  if (best && best.mode && best.absorptionDb > 20) return `D-layer absorption (${Math.round(best.absorptionDb)} dB) — try after dark`;
+  return `too weak for ${modeByName($('in-mode').value).label} — more power, a better antenna or a digital mode`;
 }
 
 function renderActiveBands() {
@@ -262,26 +352,36 @@ function renderActiveBands() {
   if (!state.tx) { $('coverage-results').innerHTML = '<p class="hint">Set a TX site first.</p>'; return; }
   if (!state.activeBands.size) { $('coverage-results').innerHTML = ''; return; }
 
-  const env = getCoverageEnv();
+  const field = getField();
+  const sys = getSys();
+  const bands = BANDS.filter((b) => state.activeBands.has(b.name));
+  const grids = coverageGrids({
+    txLat: state.tx.lat, txLon: state.tx.lon, freqsMhz: bands.map((b) => b.mhz),
+    field, sys, minTakeoffDeg: minTakeoff(), prepCache: prepCacheFor(state.tx, field),
+  });
   const openRows = [];
   const closedRows = [];
-  for (const b of BANDS) {
-    if (!state.activeBands.has(b.name)) continue;
-    const fp = coverageGrid({ txLat: state.tx.lat, txLon: state.tx.lon, freqMhz: b.mhz, ...env });
-    if (fp.maxReachKm) {
-      state.bandLayers[b.name] = makeFootprintRaster(fp, { color: b.color, opacity: 0.4 }).addTo(state.map);
-      const skip = fp.skipKm ? `skip ${Math.round(fp.skipKm)} km` : 'local';
+  bands.forEach((b, i) => {
+    const g = grids[i];
+    if (g.maxReachKm) {
+      state.bandLayers[b.name] = makeFootprintRaster(g, { color: b.color, opacity: 0.55 }).addTo(state.map);
+      const skip = g.skipKm ? `skip ${Math.round(g.skipKm)} km` : 'local';
       openRows.push(`<tr><td><span class="bdot" data-band="${b.name}"></span>${b.label}</td>` +
-        `<td>${Math.round(fp.maxReachKm)} km</td><td>${skip}</td></tr>`);
+        `<td>${Math.round(g.maxReachKm)} km</td><td>${skip}</td></tr>`);
     } else {
+      // Even a closed band may have weak (<50 %) coverage worth showing.
+      if (g.cells.some((v) => v >= 13)) {
+        state.bandLayers[b.name] = makeFootprintRaster(g, { color: b.color, opacity: 0.55 }).addTo(state.map);
+      }
       closedRows.push(`<tr><td><span class="bdot" data-band="${b.name}"></span>${b.label}</td>` +
-        `<td colspan="2"><span class="pill closed">closed</span> ${bandDiagnosis(b, env)}</td></tr>`);
+        `<td colspan="2"><span class="pill closed">closed</span> ${bandDiagnosis(b, field, sys)}</td></tr>`);
     }
-  }
+  });
   $('coverage-results').innerHTML =
-    (openRows.length ? `<table><tr><th>Band</th><th>Reach</th><th></th></tr>${openRows.join('')}</table>` : '') +
+    (openRows.length ? `<table><tr><th>Band</th><th>Reach (≥50 %)</th><th></th></tr>${openRows.join('')}</table>` : '') +
     (closedRows.length ? `<table>${closedRows.join('')}</table>` : '') +
-    `<p class="hint">Each band's filled region = where it lands; the gap by the TX is the skip zone.</p>`;
+    `<p class="hint">Shading deepens with reliability (chance the path supports
+      ${modeByName($('in-mode').value).label} with your station). The gap by the TX is the skip zone.</p>`;
   colourBandDots();
 }
 
@@ -293,40 +393,21 @@ function colourBandDots() {
   }
 }
 
-// --- Mode B: point-to-point best band ------------------------------------
+// --- Mode B: point-to-point best band ------------------------------------------
 
-function reliabilityPct(analysis, freq, groundLossDb) {
-  if (freq < analysis.lufMhz || freq > analysis.mufMhz) return 0;
-  let r = 95;
-  r -= (analysis.hopCount - 1) * 8;          // each extra hop costs reliability
-  r -= groundLossDb * 2;                      // cumulative ground reflection loss
-  // Penalty for sitting near a band edge of the usable window.
-  const mid = (analysis.lufMhz + analysis.mufMhz) / 2;
-  const halfWin = (analysis.mufMhz - analysis.lufMhz) / 2 || 1;
-  r -= 15 * Math.abs(freq - mid) / halfWin;
-  return Math.max(5, Math.min(98, Math.round(r)));
-}
+const modeLabel = (r) => (r && r.mode ? `${r.mode.n}${r.mode.layer === 'Es' ? 'Es' : r.mode.layer}` : '');
 
 function runPath(fit = true) {
   if (!state.a || !state.b) { $('path-results').innerHTML = '<p class="hint">Set both A and B.</p>'; return; }
-  const { ssn, kp } = getConditions();
-  const subsolar = getSubsolar();
-  const powerW = Number($('in-power').value) || 100;
-  const minTakeoffDeg = Number($('in-takeoff').value) || 3;
-  const modeMarginDb = modeByName($('in-mode').value).marginDb;
-  const grace = mufGraceFor(modeMarginDb);
-  const analysis = analyzePath({
+  const field = getField();
+  const sys = getSys();
+  const { short, long } = analyzePath({
     lat1: state.a.lat, lon1: state.a.lon, lat2: state.b.lat, lon2: state.b.lon,
-    ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb,
+    field, sys, minTakeoffDeg: minTakeoff(),
   });
 
-  const useClutter = $('lyr-clutter').checked;
-  const ground = useClutter
-    ? groundReflectionLossDb(analysis.groundPoints)
-    : { totalDb: 0, detail: [] };
-
   clearResultLayer();
-  state.layers.result = makePath(state.a, state.b, analysis).addTo(state.map);
+  state.layers.result = makePath(state.a, state.b, short).addTo(state.map);
   if (fit) {
     // Frame the path without zooming so far out that the world repeats.
     state.map.fitBounds(
@@ -335,61 +416,85 @@ function runPath(fit = true) {
     );
   }
 
-  // Best band: open band nearest FOT.
-  const open = BANDS.filter((b) => bandStatus(analysis, b.mhz, grace) === 'open');
-  const best = open.length
-    ? open.reduce((x, b) => (Math.abs(b.mhz - analysis.fotMhz) < Math.abs(x.mhz - analysis.fotMhz) ? b : x))
-    : null;
+  // Each band: the better of short path and long path.
+  const results = BANDS.map((b) => {
+    const sp = evalPath(short.prep, b.mhz, sys);
+    const lp = long ? evalPath(long.prep, b.mhz, sys) : null;
+    const useLp = lp && lp.reliability > sp.reliability + 0.05;
+    return { band: b, r: useLp ? lp : sp, lp: useLp };
+  });
+  const bestRes = results.reduce((x, y) => (y.r.reliability > x.r.reliability + 1e-6 ||
+    (Math.abs(y.r.reliability - x.r.reliability) <= 1e-6 && y.r.snrDb > x.r.snrDb) ? y : x));
+  const best = bestRes.r.reliability >= 0.2 ? bestRes : null;
 
-  const rows = BANDS.map((b) => {
-    const st = bandStatus(analysis, b.mhz, grace);
-    const rel = st === 'open' ? `${reliabilityPct(analysis, b.mhz, ground.totalDb)}%` : '—';
-    const cls = best && b.name === best.name ? 'row-best' : '';
-    return `<tr class="band-row ${cls}" data-freq="${b.mhz}"><td>${b.label}</td>` +
-           `<td><span class="pill ${st}">${st}</span></td><td>${rel}</td></tr>`;
+  const rows = results.map(({ band, r, lp }) => {
+    const st = statusFor(r.reliability);
+    const rel = r.mode ? `${Math.round(r.reliability * 100)}%` : '—';
+    // Far below any decode threshold the number is meaningless (above-MUF loss is unbounded).
+    const snr = r.mode && Number.isFinite(r.snrDb) && snrInBw(r.snrDb) > -60 ? `${Math.round(snrInBw(r.snrDb))} dB` : '—';
+    const cls = best && band.name === best.band.name ? 'row-best' : '';
+    return `<tr class="band-row ${cls}" data-freq="${band.mhz}"><td>${band.label}</td>` +
+      `<td><span class="pill ${st}">${st}</span></td><td>${rel}</td>` +
+      `<td class="snr">${snr}</td><td class="snr">${lp ? 'LP ' : ''}${modeLabel(r)}</td></tr>`;
   }).join('');
 
-  const surfaces = ground.detail.length
-    ? ground.detail.map((d) => d.surface).join(', ')
-    : (useClutter ? 'single hop (no intermediate bounce)' : 'disabled');
+  const lead = short.prep.modes.find((m) => m.layer === 'F2');
+  const surfaces = lead && lead.grounds.length
+    ? lead.grounds.map((g) => SURFACE[g.surface].label.toLowerCase()).join(', ')
+    : 'single hop (no intermediate bounce)';
+  const luf = Number.isFinite(short.lufMhz) ? short.lufMhz.toFixed(1) : '—';
+  const mode = modeByName($('in-mode').value);
+  const br = best ? best.r : null;
+  const budget = br && br.mode ? `
+    <table class="loss-table">
+      <tr><th colspan="2">Link budget, ${best.band.label} (${modeLabel(br)}, ${br.elevDeg.toFixed(0)}° takeoff)</th></tr>
+      <tr><td>Total path loss</td><td>${br.lossDb.toFixed(0)} dB</td></tr>
+      <tr><td>· of which D-layer absorption</td><td>${br.absorptionDb.toFixed(1)} dB</td></tr>
+      <tr><td>· of which ground reflections</td><td>${br.groundDb.toFixed(1)} dB</td></tr>
+      <tr><td>Antenna gains (both ends)</td><td>${br.gainDb.toFixed(1)} dBi</td></tr>
+      <tr><td>Noise at receiver (Fa)</td><td>${br.noiseFa.toFixed(0)} dB</td></tr>
+      <tr><td>Median SNR (${mode.bwHz} Hz)</td><td>${snrInBw(br.snrDb).toFixed(0)} dB</td></tr>
+    </table>` : '';
 
   $('path-results').innerHTML = `
-    <div class="big">${best ? best.label : 'No open band'}</div>
+    <div class="big">${best ? `${best.band.label}${best.lp ? ' (long path)' : ''}` : 'No usable band'}</div>
     <table>
-      <tr><td>Distance</td><td>${Math.round(analysis.distanceKm)} km, ${analysis.hopCount} hop(s)</td></tr>
-      <tr><td>Bearing A→B</td><td>${Math.round(analysis.bearingDeg)}°</td></tr>
-      <tr><td>MUF / FOT / LUF</td><td>${analysis.mufMhz.toFixed(1)} / ${analysis.fotMhz.toFixed(1)} / ${analysis.lufMhz.toFixed(1)} MHz</td></tr>
-      <tr><td>Ground reflections</td><td>${surfaces}${ground.totalDb ? ` (${ground.totalDb.toFixed(1)} dB)` : ''}</td></tr>
+      <tr><td>Distance</td><td>${Math.round(short.distanceKm)} km, ${short.hopCount} F2 hop(s)</td></tr>
+      <tr><td>Bearing A→B</td><td>${Math.round(short.bearingDeg)}° (long path ${Math.round((short.bearingDeg + 180) % 360)}°)</td></tr>
+      <tr><td>MUF / FOT / LUF</td><td>${short.mufMhz.toFixed(1)} / ${short.fotMhz.toFixed(1)} / ${luf} MHz</td></tr>
+      <tr><td>Ground reflections</td><td>${surfaces}</td></tr>
     </table>
     <table>
-      <tr><th>Band</th><th>Status</th><th>Rel.</th></tr>
+      <tr><th>Band</th><th>Status</th><th>Rel.</th><th>SNR</th><th>Mode</th></tr>
       ${rows}
     </table>
-    <p class="hint">Click a band to map its coverage from both ends
-      (<span class="dot dot-a"></span>A, <span class="dot dot-b"></span>B).
-      FOT (≈0.85×MUF) is the day-to-day reliable working frequency.</p>`;
+    ${budget}
+    <p class="hint">Rel. = probability ${mode.label} works on that band right now (day-to-day MUF and
+      signal variation included). SNR is the median in ${mode.bwHz} Hz. Click a band to map its coverage
+      from both ends (<span class="dot dot-a"></span>A, <span class="dot dot-b"></span>B).</p>`;
 
   // Clicking a band row overlays the coverage footprint from A and from B.
   for (const tr of $('path-results').querySelectorAll('.band-row')) {
     tr.addEventListener('click', () => {
       for (const r of $('path-results').querySelectorAll('.band-row')) r.classList.remove('selected');
       tr.classList.add('selected');
-      showBandCoverage(Number(tr.dataset.freq), { ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
+      showBandCoverage(Number(tr.dataset.freq), field, sys);
     });
   }
 
-  $('path-results').insertAdjacentHTML('beforeend', renderBandChart(state.a, state.b, { ssn, kp, powerW, minTakeoffDeg, modeMarginDb }));
+  $('path-results').insertAdjacentHTML('beforeend', renderBandChart(state.a, state.b));
 }
 
 // A 24-hour open/marginal/closed timeline for every band on the A–B path, so you
-// can see the best time to call. Diurnal change dominates; indices held constant.
-function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg, modeMarginDb }) {
+// can see the best time to call. The ionosphere is recomputed each hour.
+function renderBandChart(a, b) {
   const HOURS = 24;
-  const grace = mufGraceFor(modeMarginDb);
-  const analyses = [];
+  const preps = [];
+  const syss = [];
   for (let h = 0; h < HOURS; h++) {
-    const subsolar = subsolarPoint(new Date(state.anchorTime + h * 3600000));
-    analyses.push(analyzePath({ lat1: a.lat, lon1: a.lon, lat2: b.lat, lon2: b.lon, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb }));
+    const date = new Date(state.anchorTime + h * 3600000);
+    preps.push(preparePath({ lat1: a.lat, lon1: a.lon, lat2: b.lat, lon2: b.lon, field: getField(date), minTakeoffDeg: minTakeoff() }));
+    syss.push(getSys(date));
   }
   const nowH = Math.round((state.timeUTC.getTime() - state.anchorTime) / 3600000);
   const anchorH = state.anchorTime / 3600000 + a.lon / 15; // local-at-A hour of column 0
@@ -405,14 +510,14 @@ function renderBandChart(a, b, { ssn, kp, powerW, minTakeoffDeg, modeMarginDb })
   for (const band of [...BANDS].reverse()) { // highest band on top
     body += `<tr><td class="blabel">${band.label}</td>`;
     for (let h = 0; h < HOURS; h++) {
-      const st = bandStatus(analyses[h], band.mhz, grace);
-      body += `<td class="cell ${st}${h === nowH ? ' now' : ''}"></td>`;
+      const rel = evalPath(preps[h], band.mhz, syss[h]).reliability;
+      body += `<td class="cell ${statusFor(rel)}${h === nowH ? ' now' : ''}" title="${Math.round(rel * 100)}%"></td>`;
     }
     body += '</tr>';
   }
   return `<div class="bandchart">
-    <div class="hint" style="margin:8px 0 4px">Next 24 h on this path — <span style="color:var(--good)">open</span> /
-      <span style="color:var(--warn)">marginal</span> / closed. Hours = local time at A.</div>
+    <div class="hint" style="margin:8px 0 4px">Next 24 h on this path — <span style="color:var(--good)">open</span> (≥50 %) /
+      <span style="color:var(--warn)">marginal</span> (20–50 %) / closed. Hours = local time at A.</div>
     <table>${head}${body}</table></div>`;
 }
 
@@ -423,13 +528,13 @@ function clearBandCoverage() {
   }
 }
 
-function showBandCoverage(freqMhz, { ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb }) {
+function showBandCoverage(freqMhz, field, sys) {
   clearBandCoverage();
   const grp = L.layerGroup();
   for (const [pt, color] of [[state.a, '#3fb950'], [state.b, '#f7a32f']]) {
     if (!pt) continue;
-    const fp = coverageGrid({ txLat: pt.lat, txLon: pt.lon, freqMhz, ssn, kp, subsolar, powerW, minTakeoffDeg, modeMarginDb });
-    makeFootprintRaster(fp, { color, opacity: 0.32 }).addTo(grp);
+    const [g] = coverageGrids({ txLat: pt.lat, txLon: pt.lon, freqsMhz: [freqMhz], field, sys, minTakeoffDeg: minTakeoff() });
+    makeFootprintRaster(g, { color, opacity: 0.45 }).addTo(grp);
   }
   grp.addTo(state.map);
   state.layers.bandCoverage = grp;
@@ -464,6 +569,12 @@ function toggleKc2g() {
   }
 }
 
+function redrawIonosondes() {
+  if (state.layers.iono) { state.map.removeLayer(state.layers.iono); state.layers.iono = null; }
+  if (!$('lyr-iono').checked || !state.stations) return;
+  state.layers.iono = makeIonosondeMarkers(state.stations).addTo(state.map);
+}
+
 // --- Mode switching ------------------------------------------------------
 
 function setMode(mode) {
@@ -482,11 +593,23 @@ function setMode(mode) {
   }
 }
 
-// --- Band toggle chips (coverage mode) -----------------------------------
+// --- Selects and band toggle chips -----------------------------------------
 
-function initModeSelect() {
-  $('in-mode').innerHTML = MODES.map((m) => `<option value="${m.name}">${m.label}</option>`).join('');
-  $('in-mode').value = 'ft8'; // FT8 is the modern baseline most people actually use
+function fillSelect(id, items, value) {
+  $(id).innerHTML = items.map((x) => `<option value="${x.id ?? x.name}">${x.label}</option>`).join('');
+  $(id).value = value;
+}
+
+function initSelects() {
+  fillSelect('in-mode', MODES, 'ft8'); // FT8 is the modern baseline most people actually use
+  fillSelect('in-ant', ANTENNAS, 'dipole');
+  fillSelect('in-rx-ant', ANTENNAS, 'dipole');
+  fillSelect('in-noise', NOISE_ENVIRONMENTS, 'residential');
+  const syncHeight = (sel, h) => { $(h).disabled = !ANTENNAS.find((a) => a.id === $(sel).value).height; };
+  for (const [sel, h] of [['in-ant', 'in-ant-h'], ['in-rx-ant', 'in-rx-ant-h']]) {
+    $(sel).addEventListener('change', () => syncHeight(sel, h));
+    syncHeight(sel, h);
+  }
 }
 
 function initBandToggles() {
@@ -534,11 +657,10 @@ function wire() {
   // Inputs that change conditions update whichever mode is active.
   const refresh = refreshActive;
   $('btn-recompute').addEventListener('click', refresh);
-  $('in-power').addEventListener('change', refresh);
-  $('in-takeoff').addEventListener('change', refresh);
-  $('in-mode').addEventListener('change', refresh);
-  $('in-ssn').addEventListener('change', refresh);
-  $('in-kp').addEventListener('change', refresh);
+  for (const id of ['in-power', 'in-takeoff', 'in-mode', 'in-ssn', 'in-kp', 'in-sfi',
+    'in-ant', 'in-ant-h', 'in-rx-ant', 'in-rx-ant-h', 'in-noise', 'lyr-clutter']) {
+    $(id).addEventListener('change', refresh);
+  }
 
   $('time-slider').addEventListener('input', onSlider);
   const stepSlider = (delta) => {
@@ -548,7 +670,7 @@ function wire() {
   };
   $('btn-step-back').addEventListener('click', () => stepSlider(-1));
   $('btn-step-fwd').addEventListener('click', () => stepSlider(1));
-  $('btn-refresh-solar').addEventListener('click', loadSolar);
+  $('btn-refresh-solar').addEventListener('click', () => { loadSolar(); loadIonosondes(); });
   $('btn-now').addEventListener('click', () => {
     state.anchorTime = Date.now();
     state.timeUTC = new Date();
@@ -558,14 +680,11 @@ function wire() {
     refresh();
   });
   $('btn-noon').addEventListener('click', setNoonAtSite);
-  $('in-time').addEventListener('change', () => { readTimeInput(); redrawTerminator(); refresh(); });
-  $('in-sfi').addEventListener('change', () => {
-    $('in-ssn').value = ssnFromSfi(Number($('in-sfi').value) || 0);
-    refresh();
-  });
+  $('in-time').addEventListener('change', () => { readTimeInput(); redrawTerminator(); applyIndicesForTime(); refresh(); });
 
   $('lyr-terminator').addEventListener('change', redrawTerminator);
   $('lyr-kc2g').addEventListener('change', toggleKc2g);
+  $('lyr-iono').addEventListener('change', redrawIonosondes);
 
   $('btn-collapse').addEventListener('click', () => setCollapsed(true));
   $('btn-expand').addEventListener('click', () => setCollapsed(false));
@@ -593,16 +712,21 @@ function registerServiceWorker() {
 
 async function main() {
   initMap();
-  initModeSelect();
+  initSelects();
   initBandToggles();
   state.anchorTime = Date.now();
   state.timeUTC = new Date();
+  $('in-ssn').value = 60; // placeholder until live data arrives
+  $('in-kp').value = 2;
   renderTimeInput();
   wire();
   redrawTerminator();
   registerServiceWorker();
-  await loadSolar();
+  renderWx();
+  await Promise.all([loadSolar(), loadIonosondes()]);
   state.forecast = await fetchForecast(); // for the time-slider forecast indices
+  // Ionosondes update every ~15 min; keep the assimilation fresh.
+  setInterval(loadIonosondes, 15 * 60e3);
 }
 
 main();

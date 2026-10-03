@@ -1,0 +1,42 @@
+name: Mirror ionosonde data
+
+# KC2G's ionosonde feed (GIRO digisondes) has no CORS headers, so browsers
+# can't read it directly. Every 15 minutes this copies it to the `data` branch,
+# which the app reads via raw.githubusercontent.com (CORS-enabled).
+# The branch is force-pushed as a single commit so history doesn't grow.
+# Note: GitHub pauses scheduled workflows after 60 days without repo activity.
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ionosondes
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch and validate KC2G stations.json
+        run: |
+          curl -fsS --retry 3 --max-time 60 \
+            -A "hf-range-planner (github.com/${{ github.repository }})" \
+            https://prop.kc2g.com/api/stations.json -o stations.json
+          # Must be a non-empty JSON array of station records.
+          python3 -c "import json,sys; d=json.load(open('stations.json')); sys.exit(0 if isinstance(d,list) and len(d)>5 else 1)"
+
+      - name: Publish to the data branch
+        run: |
+          mkdir out && mv stations.json out/
+          cd out
+          git init -q -b data
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add stations.json
+          git commit -qm "Ionosonde snapshot $(date -u +%Y-%m-%dT%H:%MZ) (GIRO via KC2G)"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data

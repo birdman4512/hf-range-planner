@@ -1,12 +1,37 @@
-// solar.js — live space-weather fetch (NOAA SWPC) + index conversions.
-// Browser fetch from CORS-enabled SWPC JSON endpoints, with graceful fallback.
+// solar.js — live space weather and ionosonde data.
+//
+//   * R12 (12-month smoothed sunspot number) drives the CCIR maps. SWPC's
+//     predicted/observed solar-cycle products give it on the SILSO v2 scale;
+//     the CCIR maps were built on the v1 scale, so we convert (v1 ≈ 0.7·v2).
+//     Daily SFI is shown for reference but deliberately NOT used as the model
+//     index — the ionosphere tracks smoothed activity, and day-to-day departures
+//     are captured far better by the ionosonde assimilation.
+//   * Kp (planetary), GOES X-ray flux (flare absorption) and ≥10 MeV proton flux
+//     (polar-cap absorption).
+//   * Ionosondes: KC2G's aggregation of GIRO digisonde data. KC2G does not send
+//     CORS headers, so a scheduled GitHub Action mirrors it to this repo's `data`
+//     branch (see .github/workflows/ionosondes.yml).
 
 const SWPC = 'https://services.swpc.noaa.gov';
 const EP_FLUX = `${SWPC}/products/summary/10cm-flux.json`;
 const EP_KP = `${SWPC}/products/noaa-planetary-k-index.json`;
 const EP_OUTLOOK = `${SWPC}/text/27-day-outlook.txt`;
+const EP_CYCLE_PRED = `${SWPC}/json/solar-cycle/predicted-solar-cycle.json`;
+const EP_CYCLE_OBS = `${SWPC}/json/solar-cycle/observed-solar-cycle-indices.json`;
+const EP_XRAY = `${SWPC}/json/goes/primary/xrays-6-hour.json`;
+const EP_PROTON = `${SWPC}/json/goes/primary/integral-protons-6-hour.json`;
+export const IONOSONDE_URL = 'https://raw.githubusercontent.com/birdman4512/hf-range-planner/data/stations.json';
+
+/** SILSO v2 → v1 (CCIR-calibrated) sunspot scale factor. */
+export const SSN_V2_TO_V1 = 0.7;
 
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+
+async function getJson(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`);
+  return r.json();
+}
 
 /**
  * NOAA 27-day outlook: daily forecast of 10.7 cm flux (SFI), Ap and largest Kp.
@@ -31,9 +56,8 @@ export async function fetchForecast() {
 }
 
 /**
- * Standard Covington relation SFI = 63.75 + 0.728·SSN + 0.00089·SSN².
- * We invert it (quadratic formula) to estimate SSN from a measured SFI,
- * which avoids depending on a separate (often delayed) sunspot feed.
+ * Covington relation SFI = 63.75 + 0.728·SSN + 0.00089·SSN², inverted.
+ * (Used only to suggest an R12 when the user types an SFI.)
  */
 export function ssnFromSfi(sfi) {
   const a = 0.00089, b = 0.728, c = 63.75 - sfi;
@@ -46,41 +70,100 @@ export function sfiFromSsn(ssn) {
   return Math.round(63.75 + 0.728 * ssn + 0.00089 * ssn * ssn);
 }
 
-async function getJson(url) {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`${url} -> HTTP ${r.status}`);
-  return r.json();
+/**
+ * Smoothed sunspot number for a month from SWPC: the predicted value for that
+ * month if present, else the latest observed smoothed value. v2 scale.
+ */
+export function r12V2For(date, predicted, observed) {
+  const tag = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`;
+  const p = Array.isArray(predicted) && predicted.find((r) => r['time-tag'] === tag);
+  if (p && p.predicted_ssn > 0) return { r12: p.predicted_ssn, source: `predicted ${tag}` };
+  if (Array.isArray(observed)) {
+    for (let i = observed.length - 1; i >= 0; i--) {
+      if (observed[i].smoothed_ssn > 0) return { r12: observed[i].smoothed_ssn, source: `smoothed ${observed[i]['time-tag']}` };
+    }
+  }
+  return null;
+}
+
+/** Latest GOES 0.1–0.8 nm X-ray flux (W/m²) or null. */
+export function latestXray(arr) {
+  if (!Array.isArray(arr)) return null;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const r = arr[i];
+    if (r.energy === '0.1-0.8nm' && r.flux > 0) return { flux: r.flux, time: r.time_tag };
+  }
+  return null;
+}
+
+/** Latest GOES ≥10 MeV integral proton flux (pfu) or null. */
+export function latestProtons(arr) {
+  if (!Array.isArray(arr)) return null;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    const r = arr[i];
+    if (r.energy === '>=10 MeV' && r.flux >= 0) return { flux: r.flux, time: r.time_tag };
+  }
+  return null;
+}
+
+/** X-ray flux → flare class string (e.g. 2.3e-5 → "M2.3"). */
+export function flareClass(flux) {
+  if (!(flux > 0)) return '—';
+  const classes = [['X', 1e-4], ['M', 1e-5], ['C', 1e-6], ['B', 1e-7], ['A', 1e-8]];
+  for (const [c, base] of classes) if (flux >= base) return `${c}${(flux / base).toFixed(1)}`;
+  return 'A0';
 }
 
 /**
- * Fetch current conditions. Returns { sfi, ssn, kp, timestamp, source, ok }.
- * On any failure returns ok:false with sensible mid-cycle defaults so the UI
- * and model still work offline.
+ * Fetch current conditions. Every source is independent and best-effort.
+ * Returns { sfi, kp, r12, r12V2, r12Source, xray, protons, timestamp, ok, errors }.
+ * r12 is on the CCIR (v1) scale.
  */
 export async function fetchSpaceWeather() {
-  const out = { sfi: 120, ssn: ssnFromSfi(120), kp: 2, timestamp: null, source: 'default', ok: false };
-  try {
-    const [flux, kpArr] = await Promise.all([getJson(EP_FLUX), getJson(EP_KP)]);
+  const out = {
+    sfi: null, kp: 2, r12: 60, r12V2: null, r12Source: 'default',
+    xray: null, protons: null, timestamp: null, ok: false, errors: [],
+  };
+  const settle = (p) => p.then((v) => ({ v }), (e) => ({ e }));
+  const [flux, kpArr, pred, obs, xr, pr] = await Promise.all(
+    [EP_FLUX, EP_KP, EP_CYCLE_PRED, EP_CYCLE_OBS, EP_XRAY, EP_PROTON].map((u) => settle(getJson(u))));
 
-    // Flux endpoint: array of objects [{ flux, time_tag }] (or a single object).
-    const fluxRec = Array.isArray(flux) ? flux[flux.length - 1] : flux;
-    const fluxVal = fluxRec && (fluxRec.flux ?? fluxRec.Flux);
-    if (fluxVal != null && Number.isFinite(Number(fluxVal))) {
-      out.sfi = Math.round(Number(fluxVal));
-      out.ssn = ssnFromSfi(out.sfi);
-      out.timestamp = fluxRec.time_tag || fluxRec.TimeStamp || null;
-    }
+  if (flux.v) {
+    const rec = Array.isArray(flux.v) ? flux.v[flux.v.length - 1] : flux.v;
+    const val = rec && Number(rec.flux ?? rec.Flux);
+    if (Number.isFinite(val)) { out.sfi = Math.round(val); out.timestamp = rec.time_tag || null; }
+  } else out.errors.push('SFI');
 
-    // Kp endpoint: array of objects [{ time_tag, Kp, a_running, ... }]; last = latest.
-    if (Array.isArray(kpArr) && kpArr.length) {
-      const last = kpArr[kpArr.length - 1];
-      const kp = Number(last.Kp ?? last.kp_index ?? last.estimated_kp);
-      if (Number.isFinite(kp)) out.kp = Math.round(kp * 10) / 10;
-    }
-    out.source = 'NOAA SWPC';
-    out.ok = true;
-  } catch (err) {
-    out.error = String(err && err.message ? err.message : err);
-  }
+  if (Array.isArray(kpArr.v) && kpArr.v.length) {
+    const last = kpArr.v[kpArr.v.length - 1];
+    const kp = Number(last.Kp ?? last.kp_index ?? last.estimated_kp);
+    if (Number.isFinite(kp)) out.kp = Math.round(kp * 10) / 10;
+  } else out.errors.push('Kp');
+
+  const r = r12V2For(new Date(), pred.v, obs.v);
+  if (r) {
+    out.r12V2 = r.r12;
+    out.r12 = Math.round(r.r12 * SSN_V2_TO_V1 * 10) / 10;
+    out.r12Source = r.source;
+  } else out.errors.push('R12');
+
+  out.xray = latestXray(xr.v);
+  out.protons = latestProtons(pr.v);
+  out.ok = out.errors.length === 0;
   return out;
+}
+
+/**
+ * Fetch the mirrored KC2G ionosonde feed. Resolves to the raw JSON array or
+ * null (offline / mirror not set up).
+ */
+export async function fetchIonosondes(url = IONOSONDE_URL) {
+  try {
+    const r = await fetch(url, { cache: 'no-store' });
+    if (!r.ok) return null;
+    const js = await r.json();
+    return Array.isArray(js) ? js : null;
+  } catch {
+    return null;
+  }
 }

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Model Validation</title>
+  <style>
+    :root { --bg: #0e1116; --fg: #c9d1d9; --mute: #8b949e; --acc: #2f81f7; --panel: #161b22; }
+    body { background: var(--bg); color: var(--fg); font: 14px/1.45 system-ui, sans-serif; margin: 0; padding: 16px; max-width: 980px; }
+    h1 { font-size: 20px; margin: 0 0 4px; }
+    p { color: var(--mute); margin: 4px 0 12px; }
+    form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; background: var(--panel); padding: 12px; border-radius: 8px; }
+    label { display: flex; flex-direction: column; font-size: 12px; color: var(--mute); gap: 4px; }
+    input, select, button { font: inherit; background: var(--bg); color: var(--fg); border: 1px solid #30363d; border-radius: 6px; padding: 6px 8px; }
+    button { background: var(--acc); border-color: var(--acc); color: #fff; cursor: pointer; }
+    pre { background: var(--panel); padding: 12px; border-radius: 8px; white-space: pre-wrap; overflow-x: auto; font: 12.5px/1.4 ui-monospace, Consolas, monospace; }
+  </style>
+</head>
+<body>
+  <h1>Model validation against WSPR</h1>
+  <p>Pulls complete WSPR reception data from <a href="https://wspr.live" style="color:var(--acc)">wspr.live</a>, labels each
+     transmitter→receiver pair as decoded / not decoded, and scores the model's reliability predictions. Optionally fits the
+     calibration constants on half the slots and reports skill on the held-out half.</p>
+  <form id="f">
+    <label>Slots <input id="slots" type="number" value="8" min="2" max="48" /></label>
+    <label>Hours between slots <input id="step" type="number" value="3" min="1" max="24" /></label>
+    <label>R12 (CCIR scale) <input id="r12" type="number" value="60" /></label>
+    <label>Fit calibration <select id="fit"><option value="1">yes</option><option value="0">no</option></select></label>
+    <button type="submit">Run</button>
+  </form>
+  <pre id="out">Ready.</pre>
+  <script type="module">
+    import { fetchWspr, buildPairs, preparePairs, predict, metrics, fitCalibration, slotTimes, NETWORK } from './validate.js';
+    import { CALIBRATION } from '../src/propagation.js';
+
+    const out = document.getElementById('out');
+    const lines = [];
+    const q = new URLSearchParams(location.search);
+    const log = (s) => {
+      lines.push(s); out.textContent = lines.join('\n');
+      // Unattended runs: stream progress to the ?report= endpoint too.
+      const to = q.get('report');
+      if (to && to.startsWith('/')) fetch(`${to}-progress`, { method: 'POST', body: out.textContent }).catch(() => {});
+    };
+    const fmt = (m) => `n=${m.n}${m.nonFinite ? ` (${m.nonFinite} non-finite!)` : ''}  base rate ${(m.baseRate * 100).toFixed(1)}%  AUC ${m.auc.toFixed(3)}  Brier ${m.brier.toFixed(4)}  log-loss ${m.logLoss.toFixed(4)}`;
+    const calTable = (m) => m.calibration.filter((b) => b.n).map((b) =>
+      `  p ${b.bin.padEnd(8)} n=${String(b.n).padStart(6)}  predicted ${(b.meanP * 100).toFixed(1).padStart(5)}%  observed ${(b.observed * 100).toFixed(1).padStart(5)}%`).join('\n');
+
+    async function run({ slots, step, r12, fit, maxPos = 100, fixed = {} }) {
+      const t0 = performance.now();
+      const el = () => `${((performance.now() - t0) / 1000).toFixed(0)} s`;
+      lines.length = 0;
+      const times = slotTimes(Date.now() - 20 * 60e3, slots, step);
+      log(`Fetching ${times.length} WSPR slots…`);
+      const spots = await fetchWspr(times, [1, 3, 5, 7, 10, 14, 18, 21, 24, 28]);
+      log(`${spots.length} spots`);
+      const pairs = preparePairs(buildPairs(spots, { maxPos }), { r12 });
+      log(`${pairs.length} labelled pairs (${pairs.filter((p) => p.y).length} decoded) — ${el()}`);
+      const slotIdx = new Map(times.map((t, i) => [t.getTime(), i]));
+      const train = pairs.filter((p) => slotIdx.get(p.t) % 2 === 0);
+      const test = pairs.filter((p) => slotIdx.get(p.t) % 2 === 1);
+      const yTest = test.map((p) => p.y);
+
+      const before = metrics(yTest, predict(test, true));
+      log(`\nHeld-out, current calibration ${JSON.stringify(CALIBRATION)}\n${fmt(before)}\n${calTable(before)}`);
+      if (fit) {
+        log('\nFitting on training slots…');
+        const c = fitCalibration(train, { log, fixed });
+        const after = metrics(yTest, predict(test, true));
+        log(`\nHeld-out, fitted ${JSON.stringify(c)}\n${fmt(after)}\n${calTable(after)}`);
+      }
+      // Skill by band on the held-out set.
+      log('\nBy band (held-out):');
+      const p = predict(test, true);
+      for (const f of [...new Set(test.map((x) => x.f))].sort((a, b) => a - b)) {
+        const ix = test.map((x, i) => (x.f === f ? i : -1)).filter((i) => i >= 0);
+        const m = metrics(ix.map((i) => yTest[i]), ix.map((i) => p[i]));
+        log(`  ${f.toFixed(3).padStart(7)} MHz  ${fmt(m)}`);
+      }
+      log(`
+Done in ${el()}.`);
+      out.dataset.done = '1';
+    }
+
+    document.getElementById('f').addEventListener('submit', (e) => {
+      e.preventDefault();
+      run({
+        slots: +document.getElementById('slots').value,
+        step: +document.getElementById('step').value,
+        r12: +document.getElementById('r12').value,
+        fit: document.getElementById('fit').value === '1',
+      }).catch((err) => log(`Error: ${err.message}`));
+    });
+    // ?report=<same-origin path>: POST the final text there (for unattended runs).
+    const report = () => {
+      const to = q.get('report');
+      if (to && to.startsWith('/')) fetch(to, { method: 'POST', body: out.textContent }).catch(() => {});
+    };
+    if (q.has('auto')) {
+      run({ slots: +(q.get('slots') || 8), step: +(q.get('step') || 3), r12: +(q.get('r12') || 60), fit: q.get('fit') !== '0', maxPos: +(q.get('maxpos') || 100), fixed: q.has('sd') ? { signalSdDb: +q.get('sd') } : {} })
+        .catch((err) => log(`Error: ${err.stack}`)).finally(report);
+    }
+  </script>
+</body>
+</html>

@@ -9,7 +9,7 @@
     script-src 'self' https://unpkg.com;
     style-src 'self' https://unpkg.com;
     img-src 'self' data: blob: https://*.tile.openstreetmap.org https://unpkg.com https://prop.kc2g.com;
-    connect-src 'self' https://services.swpc.noaa.gov https://prop.kc2g.com;
+    connect-src 'self' https://services.swpc.noaa.gov https://prop.kc2g.com https://raw.githubusercontent.com;
     font-src 'self';
     manifest-src 'self';
     worker-src 'self';
@@ -96,13 +96,13 @@
         <h2 class="panel-head">Solar &amp; ionospheric conditions<span class="chev">▾</span></h2>
         <div class="panel-body">
         <div class="grid3">
-          <label>SFI (F10.7)
-            <input type="number" id="in-sfi" min="60" max="320" step="1" />
+          <label title="12-month smoothed sunspot number on the CCIR (v1) scale — the index the ionospheric maps use. Live value = SWPC predicted R12 × 0.7.">R12 (smoothed)
+            <input type="number" id="in-ssn" min="0" max="250" step="1" />
           </label>
-          <label>SSN
-            <input type="number" id="in-ssn" min="0" max="350" step="1" />
+          <label title="Today's 10.7 cm flux — for reference; the model uses R12 plus live ionosondes">SFI (today)
+            <input type="number" id="in-sfi" min="60" max="400" step="1" />
           </label>
-          <label>Kp
+          <label title="Planetary K index: storms depress foF2 and widen auroral absorption">Kp
             <input type="number" id="in-kp" min="0" max="9" step="0.1" />
           </label>
         </div>
@@ -124,6 +124,7 @@
           <span id="solar-status">Loading live data…</span>
           <button type="button" id="btn-refresh-solar" class="ghost">Refresh</button>
         </div>
+        <ul class="wx-list" id="wx-list"></ul>
         </div>
       </section>
 
@@ -133,15 +134,34 @@
         <div class="panel-body">
         <div class="grid2">
           <label>TX power (W)
-            <input type="number" id="in-power" min="1" max="1500" step="1" value="100" />
+            <input type="number" id="in-power" min="0.1" max="1500" step="any" value="100" />
           </label>
-          <label title="Lowest elevation angle your antenna radiates — low = more DX reach, high = NVIS/short">Min takeoff (°)
-            <input type="number" id="in-takeoff" min="1" max="60" step="1" value="3" />
+          <label title="Weak-signal modes (FT8, WSPR) decode far below the noise, so they reach much further than SSB">Mode
+            <select id="in-mode"></select>
           </label>
         </div>
-        <label title="Weak-signal modes (FT8) decode far below the noise, so they reach much further than SSB">Mode
-          <select id="in-mode"></select>
-        </label>
+        <div class="grid2">
+          <label>My antenna
+            <select id="in-ant" class="ant-select"></select>
+          </label>
+          <label title="Height above ground — sets the elevation pattern (low dipoles favour NVIS, high ones DX)">Height (m)
+            <input type="number" id="in-ant-h" min="1" max="100" step="1" value="10" />
+          </label>
+          <label>Other station's antenna
+            <select id="in-rx-ant" class="ant-select"></select>
+          </label>
+          <label>Height (m)
+            <input type="number" id="in-rx-ant-h" min="1" max="100" step="1" value="10" />
+          </label>
+        </div>
+        <div class="grid2">
+          <label title="Man-made noise at the receiver (ITU-R P.372). Atmospheric and galactic noise are added automatically.">Receive noise
+            <select id="in-noise"></select>
+          </label>
+          <label title="Lowest elevation angle considered for a hop (ITU-R P.533 uses 3°)">Min takeoff (°)
+            <input type="number" id="in-takeoff" min="0" max="60" step="1" value="3" />
+          </label>
+        </div>
         </div>
       </section>
 
@@ -152,14 +172,18 @@
         <div class="layer-btns">
           <label class="layer-btn lyr-day" title="Day/night terminator"><input type="checkbox" id="lyr-terminator" checked /><span>Day/night</span></label>
           <label class="layer-btn lyr-muf" title="KC2G MUF reference overlay"><input type="checkbox" id="lyr-kc2g" /><span>KC2G</span></label>
-          <label class="layer-btn lyr-clut" title="Ground-reflection clutter"><input type="checkbox" id="lyr-clutter" checked /><span>Clutter</span></label>
+          <label class="layer-btn lyr-clut" title="Fresnel ground-reflection loss from a land/sea/ice map (off: ITU fixed 2 dB per bounce)"><input type="checkbox" id="lyr-clutter" checked /><span>Ground</span></label>
+          <label class="layer-btn lyr-iono" title="Live ionosonde stations used to correct the model"><input type="checkbox" id="lyr-iono" /><span>Ionosondes</span></label>
         </div>
         </div>
       </section>
 
       <footer id="caveat">
-        <p>Estimates only — a statistical analytic model, not VOACAP/ITU-R P.533.
-           KC2G overlay is third-party (IRI-2020 + GIRO).</p>
+        <p>Monthly-median CCIR ionosphere (ITU-R P.1239) corrected by live GIRO ionosondes via
+           <a href="https://prop.kc2g.com/">KC2G</a>, with an ITU-R P.533-style link budget and P.372 noise,
+           calibrated against WSPR. Reliability = probability the path supports your mode. Still a model:
+           sporadic-E is only known where an ionosonde sees it.
+           <a href="tools/validate.html">Validate against WSPR →</a></p>
       </footer>
     </aside>
 

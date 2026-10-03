@@ -1,11 +1,11 @@
 // sw.js — service worker for PWA offline support.
 // Network-first for same-origin requests so online users always get the latest
 // deploy; falls back to cache when offline. Cross-origin (tiles, SWPC, KC2G,
-// unpkg) always goes straight to the network.
+// ionosonde mirror, unpkg) always goes straight to the network.
 //
 // NOTE: bump CACHE whenever the precached shell list changes.
 
-const CACHE = 'hf-range-planner-v16';
+const CACHE = 'hf-range-planner-v17';
 const SHELL = [
   './',
   './index.html',
@@ -22,6 +22,13 @@ const SHELL = [
   './src/propagation.js',
   './src/clutter.js',
   './src/overlays.js',
+  './src/magnetic.js',
+  './src/assimilate.js',
+  './src/antenna.js',
+  './src/noise.js',
+  './src/data/ccir.js',
+  './src/data/igrf.js',
+  './src/data/landmask.js',
 ];
 
 self.addEventListener('install', (e) => {

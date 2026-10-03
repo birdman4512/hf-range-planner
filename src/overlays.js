@@ -1,7 +1,7 @@
 // overlays.js — Leaflet rendering helpers (terminator, KC2G reference, footprint,
 // path). Uses the global `L` provided by the Leaflet script tag.
 
-import { terminatorPolyline, nightPolygon, destinationPoint } from './geo.js';
+import { terminatorPolyline, nightPolygon, intermediatePoint } from './geo.js';
 
 const L = window.L;
 const KC2G_URL = 'https://prop.kc2g.com/renders/current/mufd-normal-now.svg';
@@ -88,26 +88,6 @@ export function makeKc2gOverlay(onError) {
   return group;
 }
 
-// Circular 3-point median — kills isolated single-azimuth spikes/dropouts.
-function medianSmooth(arr) {
-  const n = arr.length;
-  return arr.map((_, i) => {
-    const t = [arr[(i - 1 + n) % n], arr[i], arr[(i + 1) % n]].sort((x, y) => x - y);
-    return t[1];
-  });
-}
-
-// Circular moving average over ±w samples — smooths the envelope so the
-// day/night terminator "comb" merges into a continuous coverage region.
-function circMean(arr, w) {
-  const n = arr.length;
-  return arr.map((_, i) => {
-    let sum = 0;
-    for (let k = -w; k <= w; k++) sum += arr[(i + k + n) % n];
-    return sum / (2 * w + 1);
-  });
-}
-
 // Keep a ring's longitudes continuous so polygons that cross the ±180° date
 // line don't draw a chord across the whole map (Leaflet handles lon outside
 // [-180,180] fine via worldCopyJump).
@@ -123,82 +103,22 @@ function unwrapLon(points) {
   });
 }
 
-/**
- * Build smoothed coverage-tier geometries (inner/outer reach per azimuth) as
- * seamless rings: each contiguous open arc is one geometry (no internal radial
- * seams), with real gaps between arcs (no chords) and date-line-safe longitudes.
- * Returns an array of geometries; each geometry is an array of rings suitable
- * for L.polygon (one ring = simple polygon; two rings = polygon with a hole).
- */
-function arcGeometries(txLat, txLon, azStepDeg, sectors, innerRaw, outerRaw) {
-  const n = sectors.length;
-  const outer = circMean(medianSmooth(outerRaw), 3);
-  const inner = circMean(medianSmooth(innerRaw), 2);
-
-  // Don't let the coverage ring grow large enough to enclose the nearer pole —
-  // a polygon that wraps a pole renders as horizontal-line artifacts. Clamp the
-  // outer radius to stay a few degrees short of the pole (≈111 km per degree).
-  const poleSafeKm = Math.max(2500, (90 - Math.abs(txLat) - 6) * 111.195);
-  for (let i = 0; i < outer.length; i++) outer[i] = Math.min(outer[i], poleSafeKm);
-  const arcStep = Math.min(2, azStepDeg / 2);
-  const dest = (az, d) => destinationPoint(txLat, txLon, az, Math.max(1, d));
-  const open = outer.map((v) => v > 50);
-  if (!open.some(Boolean)) return [];
-
-  // Fully open → one seamless annulus with a skip-zone hole.
-  if (open.every(Boolean)) {
-    const outerRing = [], innerRing = [];
-    for (let i = 0; i < n; i++) {
-      const azc = sectors[i].azimuth + azStepDeg / 2;
-      outerRing.push(dest(azc, outer[i]));
-      innerRing.push(dest(azc, inner[i]));
-    }
-    return [[unwrapLon(outerRing), unwrapLon(innerRing.reverse())]];
-  }
-
-  // Otherwise one geometry per contiguous open arc. Anchor at a closed sector.
-  let start = 0;
-  while (open[start]) start++;
-  const order = Array.from({ length: n }, (_, k) => (start + k) % n);
-  const geoms = [];
-  let run = [];
-  const flush = () => {
-    if (!run.length) return;
-    const pts = [];
-    for (const idx of run) {
-      const a0 = sectors[idx].azimuth, a1 = a0 + azStepDeg;
-      for (let az = a0; az <= a1 + 1e-6; az += arcStep) pts.push(dest(az, outer[idx]));
-    }
-    for (let r = run.length - 1; r >= 0; r--) {
-      const idx = run[r], a0 = sectors[idx].azimuth, a1 = a0 + azStepDeg;
-      for (let az = a1; az >= a0 - 1e-6; az -= arcStep) pts.push(dest(az, inner[idx]));
-    }
-    geoms.push([unwrapLon(pts)]);
-    run = [];
-  };
-  for (const idx of order) (open[idx] ? run.push(idx) : flush());
-  flush();
-  return geoms;
-}
-
-// Shift every ring of a geometry by dLon (for drawing across world copies).
-const shiftGeom = (geom, d) => geom.map((ring) => shiftLon(ring, d));
-
 function hexToRgb(hex) {
   const n = parseInt(hex.slice(1), 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
 /**
- * Render a GLOBAL coverage grid (from propagation.coverageGrid) as a reprojected
+ * Render a GLOBAL coverage grid (from propagation.coverageGrids) as a reprojected
  * raster overlay — no range limit, and poles/antipodes render correctly (unlike
- * polygons). The blocky grid is bilinearly smoothed and drawn on every world
- * copy. Pass { color, opacity } to tint per band.
+ * polygons). Cell values are reliability 0–255: shading deepens with
+ * reliability and cells below ~5 % are left clear. The blocky grid is
+ * bilinearly smoothed and drawn on every world copy. Pass { color, opacity }.
  */
 export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } = {}) {
   const { nLat, nLon, cells } = grid;
   const [r, g, b] = hexToRgb(color);
-  const alpha = Math.round(Math.min(1, opacity) * 255);
+  const maxA = Math.min(1, opacity) * 255;
 
   // Equirectangular source canvas (lat +90 at the top row).
   const eq = document.createElement('canvas');
@@ -208,9 +128,11 @@ export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } =
   for (let iLat = 0; iLat < nLat; iLat++) {
     const y = nLat - 1 - iLat;
     for (let iLon = 0; iLon < nLon; iLon++) {
-      if (cells[iLat * nLon + iLon]) {
+      const rel = cells[iLat * nLon + iLon] / 255;
+      if (rel >= 0.05) {
         const p = (y * nLon + iLon) * 4;
-        id.data[p] = r; id.data[p + 1] = g; id.data[p + 2] = b; id.data[p + 3] = alpha;
+        id.data[p] = r; id.data[p + 1] = g; id.data[p + 2] = b;
+        id.data[p + 3] = Math.round(maxA * (0.25 + 0.75 * Math.min(1, rel / 0.9)));
       }
     }
   }
@@ -238,36 +160,43 @@ export function makeFootprintRaster(grid, { color = '#2f81f7', opacity = 0.4 } =
   return group;
 }
 
-/**
- * Render a coverage footprint as one clean filled region (the reachable area
- * with a skip-zone hole), drawn on every world copy so it wraps continuously as
- * the user pans. Pass { color, opacity } to tint per band.
- */
-export function makeFootprint(footprint, { color = '#2f81f7', opacity = 0.32 } = {}) {
-  const { txLat, txLon, azStepDeg, sectors } = footprint;
-  if (!sectors.length) return L.layerGroup([]);
-
-  const geoms = arcGeometries(txLat, txLon, azStepDeg, sectors,
-    sectors.map((s) => s.reachInner), sectors.map((s) => s.reachOuter));
-
-  const style = { color, weight: 0, fillColor: color, fillOpacity: opacity, interactive: false };
+/** Render a great-circle path with hop reflection points, on every world copy. */
+export function makePath(a, b, analysis) {
   const items = [];
+  // Sample the great circle so the line passes through the reflection points.
+  const pts = [];
+  for (let i = 0; i <= 64; i++) pts.push(intermediatePoint(a.lat, a.lon, b.lat, b.lon, i / 64));
+  const line = unwrapLon(pts);
   for (const d of WORLD_COPIES) {
-    for (const g of geoms) items.push(L.polygon(shiftGeom(g, d), style));
+    items.push(L.polyline(shiftLon(line, d), { color: '#2f81f7', weight: 3, opacity: 0.9 }));
+    for (const [lat, lon] of analysis.groundPoints) {
+      // Put each marker on the same world copy as the unwrapped line.
+      const near = line.reduce((x, p) => (Math.abs(p[0] - lat) < Math.abs(x[0] - lat) ? p : x));
+      const lw = lon + 360 * Math.round((near[1] - lon) / 360);
+      items.push(L.circleMarker([lat, lw + d], {
+        radius: 4, color: '#f7a32f', fillColor: '#f7a32f', fillOpacity: 0.9, weight: 1,
+      }).bindTooltip('Ground reflection'));
+    }
   }
   return L.layerGroup(items);
 }
 
-/** Render a great-circle path with hop reflection points, on every world copy. */
-export function makePath(a, b, analysis) {
+/**
+ * Ionosonde stations used for assimilation, coloured by foF2, with a tooltip of
+ * the latest observation. Drawn on every world copy.
+ */
+export function makeIonosondeMarkers(stations) {
   const items = [];
-  const line = unwrapLon([[a.lat, a.lon], [b.lat, b.lon]]);
-  for (const d of WORLD_COPIES) {
-    items.push(L.polyline(shiftLon(line, d), { color: '#2f81f7', weight: 3, opacity: 0.9 }));
-    for (const [lat, lon] of analysis.groundPoints) {
-      items.push(L.circleMarker([lat, lon + d], {
-        radius: 4, color: '#f7a32f', fillColor: '#f7a32f', fillOpacity: 0.9, weight: 1,
-      }).bindTooltip('Ground reflection'));
+  const colour = (f) => (f >= 10 ? '#ff6b6b' : f >= 7 ? '#ffb454' : f >= 5 ? '#e6db74' : f >= 3 ? '#7ee787' : '#79c0ff');
+  for (const s of stations) {
+    const age = Math.round((Date.now() - s.timeMs) / 60000);
+    const mufd = Number.isFinite(s.M3000) ? (s.foF2 * s.M3000).toFixed(1) : '—';
+    const tip = `${s.name} (${s.code})<br>foF2 ${s.foF2.toFixed(2)} MHz · MUF(3000) ${mufd} MHz` +
+      (Number.isFinite(s.foEs) ? ` · foEs ${s.foEs.toFixed(1)}` : '') + `<br>${age} min ago`;
+    for (const d of WORLD_COPIES) {
+      items.push(L.circleMarker([s.lat, s.lon + d], {
+        radius: 5, color: '#0e1116', weight: 1, fillColor: colour(s.foF2), fillOpacity: 0.95,
+      }).bindTooltip(tip));
     }
   }
   return L.layerGroup(items);

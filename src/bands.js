@@ -18,14 +18,18 @@ export const BANDS = [
 ];
 
 /**
- * Operating modes and their weak-signal advantage in dB relative to SSB voice.
- * FT8 decodes ~24 dB below the noise (vs SSB ~+10 dB) — ~30 dB more sensitive —
- * so it works much weaker, longer, further-reaching paths.
+ * Operating modes and the signal-to-noise-density ratio each needs (dB-Hz),
+ * i.e. SNR in a 1 Hz bandwidth. Derived from the decode thresholds:
+ *   WSPR −28 dB / 2.5 kHz → 6;  FT8 −20 dB / 2.5 kHz → 14;  FT4 −17 → 17;
+ *   CW: readable by ear ≈ 0 dB in 500 Hz → 27;  SSB: usable QSO ≈ +9 dB in 3 kHz → 44.
+ * bwHz is the bandwidth each mode conventionally quotes SNR in (for display).
  */
 export const MODES = [
-  { name: 'ft8', label: 'FT8 / digital', marginDb: 28 },
-  { name: 'cw', label: 'CW', marginDb: 9 },
-  { name: 'ssb', label: 'SSB voice', marginDb: 0 },
+  { name: 'ft8', label: 'FT8', reqDbHz: 14, bwHz: 2500 },
+  { name: 'ft4', label: 'FT4', reqDbHz: 17, bwHz: 2500 },
+  { name: 'wspr', label: 'WSPR', reqDbHz: 6, bwHz: 2500 },
+  { name: 'cw', label: 'CW', reqDbHz: 27, bwHz: 500 },
+  { name: 'ssb', label: 'SSB voice', reqDbHz: 44, bwHz: 3000 },
 ];
 
 export function modeByName(name) {

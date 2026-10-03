@@ -12,6 +12,10 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   await expect(page.locator('#brand h1')).toHaveText('HF Range Planner');
   // Band toggle chips populated from bands.js.
   await expect(page.locator('#band-toggles .band-chip')).toHaveCount(11);
+  // Station selects populated from bands.js / antenna.js / noise.js.
+  await expect(page.locator('#in-mode option')).toHaveCount(5);
+  await expect(page.locator('#in-ant option')).toHaveCount(4);
+  await expect(page.locator('#in-noise option')).toHaveCount(4);
   // Leaflet map initialised (the leaflet-container class lands on #map itself).
   await expect(page.locator('#map.leaflet-container')).toBeVisible();
   await expect(page.locator('#map .leaflet-tile-pane')).toHaveCount(1);
@@ -24,7 +28,7 @@ test('app loads, renders the map and switches modes without errors', async ({ pa
   // Ignore third-party tile/data fetch errors and benign meta-CSP notices;
   // fail only on genuine app errors.
   const appErrors = errors.filter((e) =>
-    !/tile\.openstreetmap|services\.swpc|prop\.kc2g|favicon/i.test(e) &&
+    !/tile\.openstreetmap|services\.swpc|prop\.kc2g|raw\.githubusercontent|favicon|status of 404/i.test(e) &&
     !/delivered via a <meta> element/i.test(e));
   expect(appErrors, appErrors.join('\n')).toHaveLength(0);
 });
