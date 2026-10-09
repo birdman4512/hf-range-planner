@@ -1,11 +1,11 @@
 // sw.js — service worker for PWA offline support.
 // Network-first for same-origin requests so online users always get the latest
 // deploy; falls back to cache when offline. Cross-origin (tiles, SWPC, KC2G,
-// ionosonde mirror, unpkg) always goes straight to the network.
+// ionosonde mirror, unpkg) and the live-data API always go straight to the network.
 //
 // NOTE: bump CACHE whenever the precached shell list changes.
 
-const CACHE = 'hf-range-planner-v19';
+const CACHE = 'hf-range-planner-v20';
 const SHELL = [
   './',
   './index.html',
@@ -49,6 +49,7 @@ self.addEventListener('fetch', (e) => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return; // let cross-origin hit network
+  if (url.pathname.startsWith('/api/')) return;      // live data: never cache or fall back to the shell
 
   // Network-first: fetch fresh, cache a copy, fall back to cache when offline.
   e.respondWith(

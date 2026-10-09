@@ -15,7 +15,7 @@
   <pre id="out">running…</pre>
   <script type="module">
     import { runQueued } from './shim-test.js';
-    const FILES = ['geo', 'magnetic', 'iono', 'propagation', 'noise', 'assimilate', 'validate'];
+    const FILES = ['geo', 'magnetic', 'iono', 'propagation', 'noise', 'assimilate', 'validate', 'worker'];
     const out = document.getElementById('out');
     const lines = [];
     const log = (s) => { lines.push(s); out.textContent = lines.join('\n'); };

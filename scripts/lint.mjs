@@ -25,6 +25,8 @@ function walk(dir, recurse) {
 walk('src', true);
 walk('tests', true);
 walk('tools', true);
+walk('worker', true);
+walk('scripts', true);
 // Top-level app.js only (don't recurse the whole repo root).
 for (const entry of readdirSync('.')) {
   if (extname(entry) === '.js') files.add(entry);

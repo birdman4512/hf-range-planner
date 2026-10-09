@@ -68,7 +68,7 @@ python -m http.server 8080   # (or:  py -m http.server 8080  on Windows)
 ```
 
 Then open the printed URL. Geolocation ("📍 My location") needs `https://` or `localhost`
-— both the dev server and the deployed GitHub Pages site qualify.
+— both the dev server and the deployed site qualify.
 
 ## Tests
 
@@ -175,10 +175,11 @@ SNR meets the requirement, and **FOT** is 0.85 × MUF.
 
 - **Space weather** — [NOAA SWPC](https://services.swpc.noaa.gov/) JSON (CORS-enabled).
 - **Ionosondes** — [GIRO](https://giro.uml.edu/) digisonde data as aggregated by
-  [KC2G](https://prop.kc2g.com/). KC2G sends no CORS headers, so the
-  [`ionosondes`](.github/workflows/ionosondes.yml) workflow mirrors `stations.json` to this
-  repo's `data` branch every 15 minutes, and the app reads it from `raw.githubusercontent.com`.
-  Without it the app falls back to the median model.
+  [KC2G](https://prop.kc2g.com/). KC2G sends no CORS headers, so the deployed site proxies
+  it at `/api/ionosondes` ([`worker/index.js`](worker/index.js), edge-cached for 5 minutes).
+  When that isn't available (e.g. a local static server) the app falls back to the copy the
+  [`ionosondes`](.github/workflows/ionosondes.yml) workflow mirrors to this repo's `data`
+  branch, and without either it uses the median model.
 - **KC2G MUF overlay** — optional visual reference, not part of the model.
 - **Embedded data** — CCIR coefficients (ITU-R P.1239, via IRI), IGRF-14 (IAGA) and Natural
   Earth land polygons. Regenerate with
@@ -188,14 +189,29 @@ SNR meets the requirement, and **FOT** is 0.85 × MUF.
 
 ## Deploy
 
-Pushes to `main` run the gated **CI & Deploy** workflow: lint + unit + smoke tests must pass
-before a clean `_site/` is assembled and published to GitHub Pages. Enable Pages →
-"GitHub Actions" in repo settings.
+The live site is **https://hfskip.nbird.com.au**, served by
+[Cloudflare Workers](https://developers.cloudflare.com/workers/static-assets/): the static
+files are Workers Static Assets, and a tiny Worker ([`worker/index.js`](worker/index.js))
+answers only `/api/*`. Configuration is in [`wrangler.jsonc`](wrangler.jsonc); security
+headers for the static files are in [`_headers`](_headers).
 
-The **Mirror ionosonde data** workflow runs every 15 minutes (or by hand from the Actions
-tab) and force-pushes a single-commit `data` branch. GitHub pauses scheduled workflows after
-60 days without repository activity. If the app says "Ionosondes: unavailable", re-enable it
-from the Actions tab.
+Pushes to `main` run the gated **CI & Deploy** workflow: lint + unit + smoke tests must pass,
+then `npm run build` assembles a whitelisted `_site/` and `wrangler deploy` publishes it.
+
+One-time setup:
+
+1. The `nbird.com.au` zone must be on the Cloudflare account you deploy to. Wrangler creates
+   the `hfskip` DNS record and certificate itself on the first deploy (remove any existing
+   record of that name first).
+2. Create a Cloudflare API token from the **Edit Cloudflare Workers** template.
+3. Add repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+To run the Worker locally (needs Node): `npm run dev:worker`. To deploy by hand:
+`npm run deploy` (after `npx wrangler login`).
+
+The **Mirror ionosonde data** workflow (the local-dev fallback) runs every 15 minutes and
+force-pushes a single-commit `data` branch. GitHub pauses scheduled workflows after 60 days
+without repository activity; the deployed site doesn't depend on it.
 
 ## License
 

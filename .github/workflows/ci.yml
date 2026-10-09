@@ -29,25 +29,20 @@ jobs:
     needs: verify
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
     environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      name: production
+      url: https://hfskip.nbird.com.au
     steps:
       - uses: actions/checkout@v4
-      - name: Assemble _site (whitelist static assets only)
-        run: |
-          mkdir -p _site
-          cp index.html styles.css app.js sw.js manifest.webmanifest _site/
-          cp icon.svg icon-180.png icon-192.png icon-512.png _site/
-          cp -r src _site/src
-          cp -r tools _site/tools
-          if [ -d data ]; then cp -r data _site/data; fi
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/setup-node@v4
         with:
-          path: _site
-      - id: deploy
-        uses: actions/deploy-pages@v4
+          node-version: 22
+      - name: Assemble _site (whitelist static assets only)
+        run: npm run build
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '4'
+          command: deploy
