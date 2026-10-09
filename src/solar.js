@@ -9,8 +9,10 @@
 //   * Kp (planetary), GOES X-ray flux (flare absorption) and ≥10 MeV proton flux
 //     (polar-cap absorption).
 //   * Ionosondes: KC2G's aggregation of GIRO digisonde data. KC2G does not send
-//     CORS headers, so a scheduled GitHub Action mirrors it to this repo's `data`
-//     branch (see .github/workflows/ionosondes.yml).
+//     CORS headers, so the deployed site proxies it at /api/ionosondes (see
+//     worker/index.js). Where that isn't available (a local static server) we
+//     fall back to the copy a scheduled GitHub Action mirrors to this repo's
+//     `data` branch (see .github/workflows/ionosondes.yml).
 
 const SWPC = 'https://services.swpc.noaa.gov';
 const EP_FLUX = `${SWPC}/products/summary/10cm-flux.json`;
@@ -20,7 +22,10 @@ const EP_CYCLE_PRED = `${SWPC}/json/solar-cycle/predicted-solar-cycle.json`;
 const EP_CYCLE_OBS = `${SWPC}/json/solar-cycle/observed-solar-cycle-indices.json`;
 const EP_XRAY = `${SWPC}/json/goes/primary/xrays-6-hour.json`;
 const EP_PROTON = `${SWPC}/json/goes/primary/integral-protons-6-hour.json`;
-export const IONOSONDE_URL = 'https://raw.githubusercontent.com/birdman4512/hf-range-planner/data/stations.json';
+export const IONOSONDE_URLS = [
+  'api/ionosondes',
+  'https://raw.githubusercontent.com/birdman4512/hf-range-planner/data/stations.json',
+];
 
 /** SILSO v2 → v1 (CCIR-calibrated) sunspot scale factor. */
 export const SSN_V2_TO_V1 = 0.7;
@@ -154,16 +159,19 @@ export async function fetchSpaceWeather() {
 }
 
 /**
- * Fetch the mirrored KC2G ionosonde feed. Resolves to the raw JSON array or
- * null (offline / mirror not set up).
+ * Fetch the KC2G ionosonde feed, trying each source in turn. Resolves to the
+ * raw JSON array or null (offline / no source available).
  */
-export async function fetchIonosondes(url = IONOSONDE_URL) {
-  try {
-    const r = await fetch(url, { cache: 'no-store' });
-    if (!r.ok) return null;
-    const js = await r.json();
-    return Array.isArray(js) ? js : null;
-  } catch {
-    return null;
+export async function fetchIonosondes(urls = IONOSONDE_URLS) {
+  for (const url of [].concat(urls)) {
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if (!r.ok) continue;
+      const js = await r.json();
+      if (Array.isArray(js)) return js;
+    } catch {
+      // try the next source
+    }
   }
+  return null;
 }

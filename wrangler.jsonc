@@ -1,0 +1,21 @@
+// Cloudflare Workers config. Deployed from CI (.github/workflows/ci.yml) after
+// `npm run build` has assembled the whitelisted static files into _site/.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "hf-range-planner",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-09-01",
+  "assets": {
+    "directory": "./_site",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    // Only API calls invoke the Worker; every other request is a plain static asset.
+    "run_worker_first": ["/api/*"]
+  },
+  // The zone (nbird.com.au) must be on the same Cloudflare account. Wrangler
+  // creates the DNS record and certificate for a custom domain on deploy.
+  "routes": [
+    { "pattern": "hfskip.nbird.com.au", "custom_domain": true }
+  ],
+  "observability": { "enabled": true }
+}
